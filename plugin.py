@@ -5,7 +5,7 @@ from PIL import Image
 
 from io import BytesIO
 import torch
-from diffusers import DiffusionPipeline, StableDiffusionControlNetPipeline, StableDiffusionXLPipeline, StableDiffusionXLImg2ImgPipeline, StableDiffusionPipeline, StableDiffusionImg2ImgPipeline, DPMSolverMultistepScheduler, PNDMScheduler,StableDiffusionInpaintPipeline, ControlNetModel
+from diffusers import DiffusionPipeline, StableDiffusionControlNetPipeline, StableDiffusionXLPipeline, StableDiffusionXLImg2ImgPipeline, StableDiffusionPipeline, StableDiffusionImg2ImgPipeline, DPMSolverMultistepScheduler, PNDMScheduler, StableDiffusionInpaintPipeline, ControlNetModel
 import threading
 from huey.storage import FileStorage
 import time
@@ -13,15 +13,12 @@ import psutil
 import sys
 from safetensors.torch import load_file
 from collections import defaultdict
-from utils import fetch_image_quick, store_image_quick, notify_main_system_of_startup
 from compel import Compel
-from plugin import Plugin
+from plugin import Plugin, fetch_image, store_image
 from .config import plugin, config, endpoints
 
 app = FastAPI()
 storage = FileStorage("storage", path='huey_storage')
-# memcache_client = base.Client(('localhost', 11211))
-# queue = Queue(connection=redis_conn)
 
 def check_model():
     if 'sd_plugin' not in globals():
@@ -49,9 +46,9 @@ async def startup_event():
     try:
         set_model()
         print("Successfully started up")
-        notify_main_system_of_startup("stable_diffusion", "True")
+        sd_plugin.notify_main_system_of_startup("True")
     except:
-        notify_main_system_of_startup("stable_diffusion", "False")
+        sd_plugin.notify_main_system_of_startup("False")
 
 @app.get("/set_model/")
 def set_model():
@@ -69,13 +66,13 @@ def execute(prompt: str, seed: int = None, iterations: int = 20, height: int = 5
     if control_image is None:
         im = sd_plugin._predict(prompt, seed=seed, iterations=iterations, height=height, width=width, guidance_scale=guidance_scale)
     else:
-        imagebytes = fetch_image_quick(control_image)
+        imagebytes = fetch_image(control_image)
         control_image = Image.open(BytesIO(imagebytes))
         im = sd_plugin.controlnet_predict(prompt, control_image, seed=seed)
 
     output = BytesIO()
     im.save(output, format="PNG")
-    image_id = store_image_quick(output.getvalue())
+    image_id = store_image(output.getvalue())
 
     return {"status": "Success", "output_img": image_id}
 
@@ -83,14 +80,14 @@ def execute(prompt: str, seed: int = None, iterations: int = 20, height: int = 5
 def execute2(text: str, img_id: str, seed = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0):
     # check_model()
 
-    imagebytes = fetch_image_quick(img_id)
+    imagebytes = fetch_image(img_id)
     image = Image.open(BytesIO(imagebytes))
 
     # image = np.array(image)
     im = sd_plugin.img_to_img_predict(text, image, seed=seed)
     output = BytesIO()
     im.save(output, format="PNG")
-    image_id = store_image_quick(output.getvalue())
+    image_id = store_image(output.getvalue())
 
     return {"status": "Success", "output_img": image_id}
 
@@ -112,6 +109,7 @@ class SD(Plugin):
     """
     def __init__(self, arguments: "Namespace") -> None:
         super().__init__(arguments)
+        self.plugin_name = "Diffusers"
         self.set_model()
 
     def load_lora_weights(self, pipeline, checkpoint_path, multiplier=1):
