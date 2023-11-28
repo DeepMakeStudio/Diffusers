@@ -1,0 +1,29 @@
+name: sd
+channels:
+  - pytorch
+  - defaults
+dependencies:
+  - pip
+  - python
+  - pytorch::pytorch 
+  - torchvision
+  - torchaudio
+  - pip:
+      - anyio
+      - click
+      - compel
+      - diffusers==0.21.2
+      - fastapi
+      - h11
+      - idna
+      - opencv-python
+      - pydantic
+      - redis
+      - requests
+      - rq
+      - sniffio
+      - starlette
+      - uvicorn
+      - accelerate
+      - invisible_watermark
+      - transformers
