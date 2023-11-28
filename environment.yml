@@ -14,9 +14,10 @@ dependencies:
       - anyio
       - click
       - compel
-      - diffusers==0.21.2
+      - diffusers
       - fastapi
       - h11
+      - huey
       - idna
       - opencv-python
       - pydantic
