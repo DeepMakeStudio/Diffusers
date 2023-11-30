@@ -15,6 +15,7 @@ dependencies:
       - diffusers==0.21.2
       - fastapi
       - h11
+      - huey
       - idna
       - opencv-python
       - pydantic
