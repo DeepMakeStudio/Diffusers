@@ -2,7 +2,8 @@ import sys
 
 plugin = {
     "Name": "Stable Diffusion (diffusers)",
-    "Version": "0.1.0", "Author": "DeepMake",
+    "Version": "0.1.0", 
+    "Author": "DeepMake",
     "Description": "Stable Diffusion generation using the Diffusers library",
     "env": "sd"
 }
