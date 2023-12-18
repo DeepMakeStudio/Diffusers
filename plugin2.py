@@ -5,7 +5,7 @@ from PIL import Image
 
 from io import BytesIO
 import torch
-from diffusers import DiffusionPipeline, StableDiffusionControlNetPipeline, StableDiffusionXLPipeline, StableDiffusionXLImg2ImgPipeline, StableDiffusionPipeline, StableDiffusionImg2ImgPipeline, DPMSolverMultistepScheduler, PNDMScheduler, StableDiffusionInpaintPipeline, ControlNetModel
+from diffusers import (DiffusionPipeline, StableDiffusionControlNetPipeline, StableDiffusionXLPipeline, StableDiffusionXLImg2ImgPipeline, StableDiffusionPipeline, StableDiffusionImg2ImgPipeline, DPMSolverMultistepScheduler, PNDMScheduler, StableDiffusionInpaintPipeline, ControlNetModel)
 import threading
 from huey.storage import FileStorage
 import time
@@ -14,11 +14,11 @@ import sys
 from safetensors.torch import load_file
 from collections import defaultdict
 from compel import Compel
-from plugin import Plugin, fetch_image, store_image
 from .config import plugin, config, endpoints
-
+from plugin import Plugin
 import requests
 import asyncio
+
 
 app = FastAPI()
 storage = FileStorage("storage", path='huey_storage')
@@ -33,17 +33,22 @@ def check_model():
 @app.get("/get_info/")
 def plugin_info():
     check_model()
+    from plugin import Plugin  # Local import
     return sd_plugin.plugin_info()
 
 @app.get("/get_config/")
 def get_config():
     check_model()
+    from plugin import Plugin  # Local import
     return sd_plugin.get_config()
 
 @app.put("/set_config/")
 def set_config(update: dict):
+    check_model()
+    from plugin import Plugin  # Local import
     sd_plugin.set_config(update) # TODO: Validate config dict are all valid keys
     return sd_plugin.get_config()
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -67,18 +72,6 @@ async def startup_event():
         #from plugin import Plugin  # Local import
         #sd_plugin.notify_main_system_of_startup("False")
 
-"""
-@app.on_event("startup")
-async def startup_event():
-    print("Starting up")
-    # A slight delay to ensure the app has started up.
-    try:
-        set_model()
-        print("Successfully started up")
-        sd_plugin.notify_main_system_of_startup("True")
-    except:
-        sd_plugin.notify_main_system_of_startup("False")
-"""
 
 @app.get("/set_model/")
 def set_model():
@@ -89,31 +82,22 @@ def set_model():
         model_name = sd_plugin.config["model_name"]
         return {"status": "Success", "detail": f"Model set successfully to {model_name}"}
 
-"""
-@app.get("/set_model/")
-def set_model():
-    global sd_plugin
-    args = {"plugin": plugin, "config": config, "endpoints": endpoints}
-    sd_plugin = SD(Namespace(**args))
-    # try:
-    # sd_plugin.set_model(args["model_name"], dtype=args["model_dtype"])
-    model_name = sd_plugin.config["model_name"]
-    return {"status": "Success", "detail": f"Model set successfully to {model_name}"}
-"""
-
 @app.get("/execute/{prompt}")
 def execute(prompt: str, seed: int = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, control_image: str = None):
     global sd_plugin
-    # check_model()
+    #if not sd_plugin.model_is_ready:
+        #return {"status": "Error", "message": "Model is still downloading. Please try again later."}
     if control_image is None:
         im = sd_plugin._predict(prompt, seed=seed, iterations=iterations, height=height, width=width, guidance_scale=guidance_scale)
     else:
+        from plugin import fetch_image  # Local import
         imagebytes = fetch_image(control_image)
         control_image = Image.open(BytesIO(imagebytes))
         im = sd_plugin.controlnet_predict(prompt, control_image, seed=seed)
 
     output = BytesIO()
     im.save(output, format="PNG")
+    from plugin import store_image  # Local import
     image_id = store_image(output.getvalue())
 
     return {"status": "Success", "output_img": image_id}
@@ -122,6 +106,8 @@ def execute(prompt: str, seed: int = None, iterations: int = 20, height: int = 5
 def execute2(text: str, img_id: str, seed = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0):
     global sd_plugin
     # check_model()
+    #if not sd_plugin.model_is_ready:
+        #return {"status": "Error", "message": "Model is still downloading. Please try again later."}    
 
     imagebytes = fetch_image(img_id)
     image = Image.open(BytesIO(imagebytes))
@@ -150,6 +136,7 @@ class SD(Plugin):
     """
     Prediction inference.
     """
+
     DOWNLOADING = "DOWNLOADING"
     READY = "READY"
     INITIALIZING = "INITIALIZING"
@@ -158,10 +145,13 @@ class SD(Plugin):
     def __init__(self, arguments: "Namespace") -> None:
         super().__init__(arguments)
         self.plugin_name = "Diffusers"
-        self.set_model()
         self.model_is_ready = False
         self.model_initialization_state = self.NOT_STARTED
+        #self.set_model()
+        #self.plugin_states = {}  # Initialize the plugin_states dictionary
         self.plugin_states[self.plugin_name] = "INITIALIZING"  # Set initial state
+        # Start the model download and setup in a separate thread
+        #threading.Thread(target=self.set_model, daemon=True).start()
 
     def is_model_ready(self):
         return self.model_is_ready
