@@ -7,7 +7,6 @@ from io import BytesIO
 import torch
 from diffusers import DiffusionPipeline, StableDiffusionControlNetPipeline, StableDiffusionXLPipeline, StableDiffusionXLImg2ImgPipeline, StableDiffusionPipeline, StableDiffusionImg2ImgPipeline, DPMSolverMultistepScheduler, PNDMScheduler, StableDiffusionInpaintPipeline, ControlNetModel
 import threading
-from huey.storage import FileStorage
 import time
 import psutil
 import sys
@@ -18,7 +17,6 @@ from plugin import Plugin, fetch_image, store_image
 from .config import plugin, config, endpoints
 
 app = FastAPI()
-storage = FileStorage("storage", path='huey_storage')
 
 def check_model():
     if 'sd_plugin' not in globals():
