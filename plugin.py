@@ -46,10 +46,9 @@ async def startup_event():
         print("Successfully started up")
         sd_plugin.notify_main_system_of_startup("True")
     except Exception as e:
-        if isinstance(e, RuntimeError) and "out of memory" in str(e):
-            sd_plugin.notify_main_system_of_startup("there was not enough memory to load")
-        else:
-            sd_plugin.notify_main_system_of_startup("of unknown error")
+        
+        sd_plugin.notify_main_system_of_startup("False", error=e)
+        
 
 @app.get("/set_model/")
 def set_model():
@@ -278,3 +277,5 @@ class SD(Plugin):
         embed_prompt, generator = self.prep_inputs(seed, prompt)
         output_img = self.controlpipe(prompt_embeds=embed_prompt, generator=generator, image = image, num_inference_steps=25).images[0]
         return output_img
+    
+
