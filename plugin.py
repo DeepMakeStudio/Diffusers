@@ -45,8 +45,11 @@ async def startup_event():
         set_model()
         print("Successfully started up")
         sd_plugin.notify_main_system_of_startup("True")
-    except:
-        sd_plugin.notify_main_system_of_startup("False")
+    except Exception as e:
+        if isinstance(e, RuntimeError) and "out of memory" in str(e):
+            sd_plugin.notify_main_system_of_startup("there was not enough memory to load")
+        else:
+            sd_plugin.notify_main_system_of_startup("of unknown error")
 
 @app.get("/set_model/")
 def set_model():
