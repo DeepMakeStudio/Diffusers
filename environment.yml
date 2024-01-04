@@ -8,7 +8,6 @@ dependencies:
   - python
   - pytorch 
   - torchvision
-  - torchaudio
   - pytorch-cuda=11.8
   - pip:
       - anyio
@@ -20,6 +19,7 @@ dependencies:
       - huey
       - idna
       - opencv-python
+      - psutil
       - pydantic
       - pymemcache
       - requests

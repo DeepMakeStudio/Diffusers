@@ -7,7 +7,6 @@ dependencies:
   - python
   - pytorch::pytorch 
   - torchvision
-  - torchaudio
   - pip:
       - anyio
       - click
@@ -18,10 +17,9 @@ dependencies:
       - huey
       - idna
       - opencv-python
+      - psutil
       - pydantic
-      - redis
       - requests
-      - rq
       - sniffio
       - starlette
       - uvicorn
