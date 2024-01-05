@@ -5,7 +5,8 @@ plugin = {
     "Version": "0.1.0", 
     "Author": "DeepMake",
     "Description": "Stable Diffusion generation using the Diffusers library",
-    "env": "sd"
+    "env": "sd",
+    "memory_usage": 4000
 }
 config = {
     "model_name": "runwayml/stable-diffusion-v1-5",
