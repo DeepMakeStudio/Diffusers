@@ -5,7 +5,7 @@ from PIL import Image
 
 from io import BytesIO
 import torch
-from diffusers import DiffusionPipeline, StableDiffusionControlNetPipeline, StableDiffusionXLPipeline, StableDiffusionXLImg2ImgPipeline, StableDiffusionPipeline, StableDiffusionImg2ImgPipeline, DPMSolverMultistepScheduler, PNDMScheduler, StableDiffusionInpaintPipeline, ControlNetModel
+from diffusers import DiffusionPipeline, StableDiffusionControlNetPipeline, StableDiffusionXLPipeline, AutoPipelineForImage2Image, StableDiffusionPipeline, StableDiffusionImg2ImgPipeline, DPMSolverMultistepScheduler, PNDMScheduler, StableDiffusionInpaintPipeline, ControlNetModel
 import threading
 import time
 import psutil
@@ -15,7 +15,7 @@ from collections import defaultdict
 from compel import Compel
 from plugin import Plugin, fetch_image, store_image
 from .config import plugin, config, endpoints
-
+import numpy as np
 app = FastAPI()
 
 def check_model():
@@ -80,8 +80,7 @@ def execute2(text: str, img_id: str, seed = None, iterations: int = 20, height: 
 
     imagebytes = fetch_image(img_id)
     image = Image.open(BytesIO(imagebytes))
-
-    # image = np.array(image)
+    image = np.array(image)[..., :3]
     im = sd_plugin.img_to_img_predict(text, image, seed=seed)
     output = BytesIO()
     im.save(output, format="PNG")
@@ -204,7 +203,7 @@ class SD(Plugin):
                 self.type = "xl"
                 self.tti = StableDiffusionXLPipeline.from_pretrained(model_path,
                                                                      torch_dtype=torch.float32 if dtype == "fp32" else torch.float16,
-                                                                     variant=dtypee)
+                                                                     variant=dtype)
             else:
                 self.type = "sd"
                 self.tti = StableDiffusionPipeline.from_pretrained(model_path,
@@ -257,9 +256,9 @@ class SD(Plugin):
         image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
         return image
 
-    def img_to_img_predict(self, text, image, seed=None):
+    def img_to_img_predict(self, text, image, seed=None, iterations=25, height=512, width=512, guidance_scale=7.0):
         embed_prompt, generator = self.prep_inputs(seed, text)
-        output_img = self.iti(prompt_embeds=embed_prompt, generator=generator, image = image, num_inference_steps=25).images[0]
+        output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
         return output_img
 
     def lora(self):
