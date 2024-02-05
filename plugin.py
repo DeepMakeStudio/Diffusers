@@ -13,7 +13,7 @@ import sys
 from safetensors.torch import load_file
 from collections import defaultdict
 from compel import Compel
-from plugin import Plugin, fetch_image, store_image
+from plugin import Plugin, fetch_image, store_image, report_memory_usage
 from .config import plugin, config, endpoints
 import numpy as np
 
@@ -243,7 +243,7 @@ class SD(Plugin):
         elif torch.cuda.is_available():
             self.tti.to("cuda", torch.float32 if dtype == "fp32" else torch.float16)
             self.iti.to("cuda", torch.float32 if dtype == "fp32" else torch.float16)
-        self.report_memory_usage()
+        report_memory_usage(self.mem_usage_by_prediction, self.plugin)
     def prep_inputs(self, seed, text):
         compel_proc = Compel(tokenizer=self.tti.tokenizer, text_encoder=self.tti.text_encoder)
         embed_prompt = compel_proc(text)
@@ -260,14 +260,14 @@ class SD(Plugin):
         """
         embed_prompt, generator = self.prep_inputs(seed, text)
         image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
-        self.report_memory_usage()
+        report_memory_usage(self.mem_usage_by_prediction, self.plugin)
 
         return image
 
     def img_to_img_predict(self, text, image, seed=None):
         embed_prompt, generator = self.prep_inputs(seed, text)
         output_img = self.iti(prompt_embeds=embed_prompt, generator=generator, image = image, num_inference_steps=25).images[0]
-        self.report_memory_usage()
+        report_memory_usage(self.mem_usage_by_prediction, self.plugin)
 
         return output_img
 
@@ -285,15 +285,5 @@ class SD(Plugin):
         output_img = self.controlpipe(prompt_embeds=embed_prompt, generator=generator, image = image, num_inference_steps=25).images[0]
         return output_img
     
-    def report_memory_usage(self):
-        if torch.cuda.is_available():
-            memory_usage = torch.cuda.memory_allocated() / 2**20
-        elif torch.backends.mps.is_available():
-            memory_usage = torch.mps.current_allocated_memory() / 2**20
-        if len(self.mem_usage_by_prediction) != 0:
-            model_mem = self.mem_usage_by_prediction[0]
-            self.mem_usage_by_prediction.append(memory_usage + model_mem)
-            self.plugin["memory_usage"] = np.mean(self.mem_usage_by_prediction[1:])
-        else:
-            self.mem_usage_by_prediction.append(memory_usage)
+    
         
