@@ -5,7 +5,7 @@ from PIL import Image
 
 from io import BytesIO
 import torch
-from diffusers import DiffusionPipeline, StableDiffusionControlNetPipeline, StableDiffusionXLPipeline,StableDiffusionImg2ImgPipeline,  StableDiffusionPipeline, StableDiffusionImg2ImgPipeline, DPMSolverMultistepScheduler, PNDMScheduler, StableDiffusionInpaintPipeline, ControlNetModel
+from diffusers import DiffusionPipeline, StableDiffusionControlNetPipeline, StableDiffusionXLPipeline,StableDiffusionImg2ImgPipeline,AutoPipelineForImage2Image, StableDiffusionPipeline, StableDiffusionImg2ImgPipeline, DPMSolverMultistepScheduler, PNDMScheduler, StableDiffusionInpaintPipeline, ControlNetModel
 import threading
 import time
 import psutil
@@ -208,8 +208,7 @@ class SD(Plugin):
                 self.type = "sd"
                 self.tti = StableDiffusionPipeline.from_pretrained(model_path,
                                                                    torch_dtype=torch.float32 if dtype == "fp32" else torch.float16,
-                                                                 variant=dtype)
-            
+                                                                   variant=dtype)
         if self.config["scheduler"] == "pndm":
             pass
         elif self.config["scheduler"] == "dpm":
@@ -217,7 +216,7 @@ class SD(Plugin):
         else:
             print("Warning: Unknown scheduler. Using PNDM")
 
-        self.iti = StableDiffusionImg2ImgPipeline(**self.tti.components)
+        self.iti = AutoPipelineForImage2Image.from_pipe(self.tti)
         controlnetpath = self.config["controlnet"]
         if controlnetpath is not None:
             controlnetmodel = ControlNetModel.from_pretrained(controlnetpath, torch_dtype=torch.float32 if dtype == "fp32" else torch.float16)
