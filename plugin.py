@@ -13,7 +13,7 @@ import sys
 from safetensors.torch import load_file
 from collections import defaultdict
 from compel import Compel
-from plugin import Plugin, fetch_image, store_image, report_memory_usage
+from plugin import Plugin, fetch_image, store_image
 from .config import plugin, config, endpoints
 import numpy as np
 
@@ -49,6 +49,10 @@ async def startup_event():
     except Exception as e:
         
         sd_plugin.notify_main_system_of_startup("False", error=e)
+
+@app.get("/memory_usage/")
+def memory_usage():
+    return sd_plugin.memory_history, sd_plugin.plugin
         
 
 @app.get("/set_model/")
@@ -111,7 +115,6 @@ class SD(Plugin):
     def __init__(self, arguments: "Namespace") -> None:
         super().__init__(arguments)
         self.plugin_name = "Diffusers"
-        self.mem_usage_by_prediction = []
         self.set_model()
 
 
@@ -243,7 +246,7 @@ class SD(Plugin):
         elif torch.cuda.is_available():
             self.tti.to("cuda", torch.float32 if dtype == "fp32" else torch.float16)
             self.iti.to("cuda", torch.float32 if dtype == "fp32" else torch.float16)
-        report_memory_usage(self.mem_usage_by_prediction, self.plugin)
+        self.report_memory_usage(model=True)
     def prep_inputs(self, seed, text):
         compel_proc = Compel(tokenizer=self.tti.tokenizer, text_encoder=self.tti.text_encoder)
         embed_prompt = compel_proc(text)
@@ -260,14 +263,14 @@ class SD(Plugin):
         """
         embed_prompt, generator = self.prep_inputs(seed, text)
         image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
-        report_memory_usage(self.mem_usage_by_prediction, self.plugin)
+        self.report_memory_usage()
 
         return image
 
     def img_to_img_predict(self, text, image, seed=None):
         embed_prompt, generator = self.prep_inputs(seed, text)
         output_img = self.iti(prompt_embeds=embed_prompt, generator=generator, image = image, num_inference_steps=25).images[0]
-        report_memory_usage(self.mem_usage_by_prediction, self.plugin)
+        self.report_memory_usage()
 
         return output_img
 
