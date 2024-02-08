@@ -39,15 +39,5 @@ endpoints = {
             "strength": "Float(default=0.75, min=0.0, max=1.0, optional=true)"
         },
         "outputs": {"output_img": "Image"}
-    },
-    "generate_image_controlnet": {
-        "call": "execute",
-        "inputs": {
-            "prompt": "Text",
-            "seed": "Int(default=None, optional=true)",
-            "control_image": "Image(optional=true)",
-            "iterations": "Int(default=20, min=1, optional=true)",
-            "height": "Int(default=512, min=16, optional=true)",
-            "width": "Int(default=512, min=16, optional=true)"},
-        "outputs": {"output_img": "Image"}}
+    }
     }
