@@ -15,6 +15,10 @@ from collections import defaultdict
 from compel import Compel
 from plugin import Plugin, fetch_image, store_image
 from .config import plugin, config, endpoints
+from pyqtspinner import WaitingSpinner
+from PyQt5.QtCore import Qt
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QScrollArea, QApplication
+from plugin.Diffusers.download_gui import LoadingBar
 
 app = FastAPI()
 
@@ -101,6 +105,18 @@ def shutdown():
     threading.Thread(target=self_terminate, daemon=True).start()
     return {"success": True}
 
+class Window(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.spinner = WaitingSpinner(self, True, True)
+    
+    def start_spinner(self):
+        self.spinner.start()
+    
+    def stop_spinner(self):
+        self.spinner.stop()
+
+
 class SD(Plugin):
     """
     Prediction inference.
@@ -186,8 +202,12 @@ class SD(Plugin):
         """
         Load given weights into model.
         """
+
+        load_bar = LoadingBar()
         model_path = self.config["model_name"]
         dtype = self.config["model_dtype"]
+        # downloads model weights
+        load_bar.start(model_path, torch.float32 if dtype == "fp32" else torch.float16, dtype)
         if os.path.exists(model_path):
             if "xl" in model_path.lower():
                 self.type = "xl"
