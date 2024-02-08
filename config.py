@@ -40,4 +40,4 @@ endpoints = {
         },
         "outputs": {"output_img": "Image"}
     }
-    }
+}
