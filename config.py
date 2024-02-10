@@ -13,6 +13,7 @@ config = {
     "loras": [],
     "inverters": [],
     "scheduler": "pndm",
+    "sd_turbo_model_name": "stabilityai/sdxl-turbo",
     "controlnet": "lllyasviel/sd-controlnet-canny"
 }
 endpoints = {
@@ -37,6 +38,15 @@ endpoints = {
             "height": "Int(default=512, min=16, optional=true)",
             "width": "Int(default=512, min=16, optional=true)",
             "strength": "Float(default=0.75, min=0.0, max=1.0, optional=true)"
+        },
+        "outputs": {"output_img": "Image"}
+    },
+    "generate_turbo_image": {
+        "call": "execute_sd_turbo",
+        "inputs": {
+            "prompt": "Text",
+            "num_inference_steps": "Int(default=1, min=1, optional=true)",
+            "guidance_scale": "Float(default=0.0, min=0.0, optional=true)"
         },
         "outputs": {"output_img": "Image"}
     }

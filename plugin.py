@@ -44,6 +44,8 @@ async def startup_event():
     try:
         set_model()
         print("Successfully started up")
+        # Placeholder for SD Turbo, actual initialization will be lazy
+        print("SD Turbo model will be initialized on first request.")
         sd_plugin.notify_main_system_of_startup("True")
     except:
         sd_plugin.notify_main_system_of_startup("False")
@@ -87,6 +89,29 @@ def execute2(text: str, img_id: str, seed = None, iterations: int = 20, height: 
     image_id = store_image(output.getvalue())
 
     return {"status": "Success", "output_img": image_id}
+
+@app.get("/execute_sd_turbo/{prompt}")
+def execute_sd_turbo(prompt: str, num_inference_steps: int = 1, guidance_scale: float = 0.0):
+    # Ensure the SD Turbo model is initialized
+    if 'sd_turbo' not in sd_plugin.__dict__:
+        sd_plugin.set_sd_turbo_model()
+
+    # Generate image with SD Turbo
+    try:
+        image = sd_plugin.sd_turbo(
+            prompt=prompt,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale
+        ).images[0]
+        
+        # Convert image to bytes and store it
+        output = BytesIO()
+        image.save(output, format="PNG")
+        image_id = store_image(output.getvalue())
+
+        return {"status": "Success", "output_img": image_id}
+    except Exception as e:
+        return {"status": "Error", "message": str(e)}
 
 def self_terminate():
     time.sleep(3)
@@ -238,6 +263,17 @@ class SD(Plugin):
         elif torch.cuda.is_available():
             self.tti.to("cuda", torch.float32 if dtype == "fp32" else torch.float16)
             self.iti.to("cuda", torch.float32 if dtype == "fp32" else torch.float16)
+
+    def set_sd_turbo_model(self):
+        if 'sd_turbo' not in self.__dict__:
+            print("Initializing SD Turbo model...")
+            self.sd_turbo = AutoPipelineForText2Image.from_pretrained(
+                config["sd_turbo_model_name"], 
+                torch_dtype=torch.float16,  # Assuming CUDA is available and fp16 is desired
+                variant=config["model_dtype"]
+            )
+            self.sd_turbo.to("cuda" if torch.cuda.is_available() else "cpu")
+            print("SD Turbo model initialized.")
 
     def prep_inputs(self, seed, text):
         compel_proc = Compel(tokenizer=self.tti.tokenizer, text_encoder=self.tti.text_encoder)
