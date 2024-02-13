@@ -45,7 +45,8 @@ class LoadingBar():
         self.main_window.close()
 
     def download_model(self, model_path, dtype, variant):
-        StableDiffusionPipeline.from_pretrained(model_path, torch_dtype=torch.float32, variant=variant)
+        temp = StableDiffusionPipeline.from_pretrained(model_path, torch_dtype=torch.float32, variant=variant)
+        temp = None
         self.stop_event.set()
 
 
@@ -62,9 +63,3 @@ class LoadingBar():
                 except:
                     pass
    
-    # time.sleep(2)
-    # window.write_event_value('Exit', '')
-
-# load_bar = LoadingBar()
-# load_bar.start("runwayml/stable-diffusion-v1-5", "float32", )
-# threading.Thread(target=load_bar.start, daemon=True).start()
