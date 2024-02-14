@@ -12,7 +12,7 @@ import psutil
 import sys
 from safetensors.torch import load_file
 from collections import defaultdict
-from compel import Compel
+from compel import Compel, ReturnedEmbeddingsType
 from plugin import Plugin, fetch_image, store_image
 from .config import plugin, config, endpoints
 import numpy as np
@@ -240,7 +240,15 @@ class SD(Plugin):
             self.iti.to("cuda", torch.float32 if dtype == "fp32" else torch.float16)
 
     def prep_inputs(self, seed, text):
-        compel_proc = Compel(tokenizer=self.tti.tokenizer, text_encoder=self.tti.text_encoder)
+        if self.type == "xl":
+            compel_proc = Compel(
+                tokenizer=[self.tti.tokenizer, self.tti.tokenizer_2] ,
+                text_encoder=[self.tti.text_encoder, self.tti.text_encoder_2],
+                returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
+                requires_pooled=[False, True]
+                )
+        else:
+            compel_proc = Compel(tokenizer=self.tti.tokenizer, text_encoder=self.tti.text_encoder)
         embed_prompt = compel_proc(text)
         generator = None
         if seed is not None:
@@ -253,13 +261,21 @@ class SD(Plugin):
         With a threading lock (to prevent stacking), run the selected faces through the Faceswap
         model predict function and add the output to :attr:`predicted`
         """
-        embed_prompt, generator = self.prep_inputs(seed, text)
-        image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
+        embed_prompt, generator = self.prep_inputs(seed, text) 
+        if self.type == "xl":
+            conditioning, pooled = embed_prompt
+            image =  self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
+        else:
+            image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
         return image
 
     def img_to_img_predict(self, text, image, seed=None, iterations=25, height=512, width=512, guidance_scale=7.0, strength=0.75):
         embed_prompt, generator = self.prep_inputs(seed, text)
-        output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale,strength=strength).images[0]
+        if self.type == "xl":
+            conditioning, pooled = embed_prompt
+            output_img =  self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
+        else:
+            output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale,strength=strength).images[0]
         return output_img
 
     def lora(self):
