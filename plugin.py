@@ -5,14 +5,14 @@ from PIL import Image
 
 from io import BytesIO
 import torch
-from diffusers import DiffusionPipeline, StableDiffusionControlNetPipeline, StableDiffusionXLPipeline, StableDiffusionXLImg2ImgPipeline, StableDiffusionPipeline, StableDiffusionImg2ImgPipeline, DPMSolverMultistepScheduler, PNDMScheduler, StableDiffusionInpaintPipeline, ControlNetModel
+from diffusers import DiffusionPipeline, StableDiffusionControlNetPipeline, StableDiffusionXLControlNetPipeline, StableDiffusionXLPipeline,AutoPipelineForText2Image,AutoPipelineForImage2Image, StableDiffusionPipeline, StableDiffusionImg2ImgPipeline, DPMSolverMultistepScheduler, PNDMScheduler, StableDiffusionInpaintPipeline, ControlNetModel
 import threading
 import time
 import psutil
 import sys
 from safetensors.torch import load_file
 from collections import defaultdict
-from compel import Compel
+from compel import Compel, ReturnedEmbeddingsType
 from plugin import Plugin, fetch_image, store_image
 from .config import plugin, config, endpoints
 from plugin.Diffusers.download_gui import LoadingBar
@@ -76,14 +76,13 @@ def execute(prompt: str, seed: int = None, iterations: int = 20, height: int = 5
     return {"status": "Success", "output_img": image_id}
 
 @app.get("/execute2/{text}/{img_id}")
-def execute2(text: str, img_id: str, seed = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0):
+def execute2(text: str, img_id: str, seed = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, strength: float = 0.75):
     # check_model()
 
     imagebytes = fetch_image(img_id)
     image = Image.open(BytesIO(imagebytes))
-
-    # image = np.array(image)
-    im = sd_plugin.img_to_img_predict(text, image, seed=seed)
+    image = image.convert("RGB")
+    im = sd_plugin.img_to_img_predict(text, image, seed=seed, iterations=iterations, height=height, width=width, guidance_scale=guidance_scale, strength=strength)
     output = BytesIO()
     im.save(output, format="PNG")
     image_id = store_image(output.getvalue())
@@ -219,14 +218,15 @@ class SD(Plugin):
         else:
             if "xl" in model_path.lower():
                 self.type = "xl"
-                self.tti = StableDiffusionXLPipeline.from_pretrained(model_path,
-                                                                     torch_dtype=torch.float32 if dtype == "fp32" else torch.float16,
-                                                                     variant=dtypee)
+                # self.tti = StableDiffusionXLPipeline.from_pretrained(model_path,
+                #                                                      torch_dtype=torch.float32 if dtype == "fp32" else torch.float16,
+                #                                                      variant=dtype)
             else:
                 self.type = "sd"
-                self.tti = StableDiffusionPipeline.from_pretrained(model_path,
-                                                                   torch_dtype=torch.float32 if dtype == "fp32" else torch.float16,
-                                                                   variant=dtype)
+                # self.tti = StableDiffusionPipeline.from_pretrained(model_path,
+                #                                                    torch_dtype=torch.float32 if dtype == "fp32" else torch.float16,
+                #                                                    variant=dtype)
+            self.tti = AutoPipelineForText2Image.from_pretrained(model_path, torch_dtype=torch.float32 if dtype == "fp32" else torch.float16, variant=dtype)
         if self.config["scheduler"] == "pndm":
             pass
         elif self.config["scheduler"] == "dpm":
@@ -234,11 +234,11 @@ class SD(Plugin):
         else:
             print("Warning: Unknown scheduler. Using PNDM")
 
-        self.iti = StableDiffusionImg2ImgPipeline(**self.tti.components)
+        self.iti = AutoPipelineForImage2Image.from_pipe(self.tti)
         controlnetpath = self.config["controlnet"]
         if controlnetpath is not None:
             controlnetmodel = ControlNetModel.from_pretrained(controlnetpath, torch_dtype=torch.float32 if dtype == "fp32" else torch.float16)
-            self.controlpipe = StableDiffusionControlNetPipeline(**self.tti.components, controlnet=controlnetmodel)
+            self.controlpipe = AutoPipelineForText2Image.from_pipe(self.tti, controlnet=controlnetmodel)
             if sys.platform == "darwin":
                 self.controlpipe.to("mps")
             else:
@@ -257,7 +257,15 @@ class SD(Plugin):
             self.iti.to("cuda", torch.float32 if dtype == "fp32" else torch.float16)
 
     def prep_inputs(self, seed, text):
-        compel_proc = Compel(tokenizer=self.tti.tokenizer, text_encoder=self.tti.text_encoder)
+        if self.type == "xl":
+            compel_proc = Compel(
+                tokenizer=[self.tti.tokenizer, self.tti.tokenizer_2] ,
+                text_encoder=[self.tti.text_encoder, self.tti.text_encoder_2],
+                returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
+                requires_pooled=[False, True]
+                )
+        else:
+            compel_proc = Compel(tokenizer=self.tti.tokenizer, text_encoder=self.tti.text_encoder)
         embed_prompt = compel_proc(text)
         generator = None
         if seed is not None:
@@ -270,13 +278,21 @@ class SD(Plugin):
         With a threading lock (to prevent stacking), run the selected faces through the Faceswap
         model predict function and add the output to :attr:`predicted`
         """
-        embed_prompt, generator = self.prep_inputs(seed, text)
-        image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
+        embed_prompt, generator = self.prep_inputs(seed, text) 
+        if self.type == "xl":
+            conditioning, pooled = embed_prompt
+            image =  self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
+        else:
+            image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
         return image
 
-    def img_to_img_predict(self, text, image, seed=None):
+    def img_to_img_predict(self, text, image, seed=None, iterations=25, height=512, width=512, guidance_scale=7.0, strength=0.75):
         embed_prompt, generator = self.prep_inputs(seed, text)
-        output_img = self.iti(prompt_embeds=embed_prompt, generator=generator, image = image, num_inference_steps=25).images[0]
+        if self.type == "xl":
+            conditioning, pooled = embed_prompt
+            output_img =  self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
+        else:
+            output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale,strength=strength).images[0]
         return output_img
 
     def lora(self):
