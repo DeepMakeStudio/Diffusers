@@ -15,9 +15,6 @@ from collections import defaultdict
 from compel import Compel
 from plugin import Plugin, fetch_image, store_image
 from .config import plugin, config, endpoints
-from pyqtspinner import WaitingSpinner
-from PyQt5.QtCore import Qt
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QScrollArea, QApplication
 from plugin.Diffusers.download_gui import LoadingBar
 
 app = FastAPI()
