@@ -101,18 +101,6 @@ def shutdown():
     threading.Thread(target=self_terminate, daemon=True).start()
     return {"success": True}
 
-class Window(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.spinner = WaitingSpinner(self, True, True)
-    
-    def start_spinner(self):
-        self.spinner.start()
-    
-    def stop_spinner(self):
-        self.spinner.stop()
-
-
 class SD(Plugin):
     """
     Prediction inference.
