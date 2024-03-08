@@ -273,9 +273,10 @@ class SD(Plugin):
         embed_prompt, generator = self.prep_inputs(seed, text)
         if self.type == "xl":
             conditioning, pooled = embed_prompt
-            output_img =  self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
+            output_img = self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image=image, generator=generator, num_inference_steps=iterations, guidance_scale=guidance_scale).images[0]
         else:
-            output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale,strength=strength).images[0]
+            output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, guidance_scale=guidance_scale,strength=strength).images[0]
+        output_img = output_img.resize((height, width))
         return output_img
 
     def lora(self):
