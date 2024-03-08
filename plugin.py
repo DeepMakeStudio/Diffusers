@@ -74,11 +74,11 @@ def execute(prompt: str, seed: int = None, iterations: int = 20, height: int = 5
 
     return {"status": "Success", "output_img": image_id}
 
-@app.get("/execute2/{text}/{img_id}")
-def execute2(text: str, img_id: str, seed = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, strength: float = 0.75):
+@app.get("/execute2/{text}/{img}")
+def execute2(text: str, img: str, seed = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, strength: float = 0.75):
     # check_model()
 
-    imagebytes = fetch_image(img_id)
+    imagebytes = fetch_image(img)
     image = Image.open(BytesIO(imagebytes))
     image = image.convert("RGB")
     im = sd_plugin.img_to_img_predict(text, image, seed=seed, iterations=iterations, height=height, width=width, guidance_scale=guidance_scale, strength=strength)
