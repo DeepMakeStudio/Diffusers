@@ -100,6 +100,16 @@ def shutdown():
     threading.Thread(target=self_terminate, daemon=True).start()
     return {"success": True}
 
+@app.post("/plugins/install")
+def install_plugin():
+    sd_plugin.on_install(sd_plugin.config.get('model_urls', {}), sd_plugin.progress_callback)
+    return {"message": "Plugin installation started"}
+
+@app.post("/plugins/uninstall")
+def uninstall_plugin():
+    sd_plugin.on_uninstall(sd_plugin.progress_callback)
+    return {"message": "Plugin uninstallation started"}
+
 class SD(Plugin):
     """
     Prediction inference.
