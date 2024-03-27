@@ -102,15 +102,11 @@ def shutdown():
 
 @app.post("/plugins/install")
 def install_plugin():
-    # Make sure to create an instance of SD correctly with the required arguments
-    #sd_plugin = SD(arguments=Namespace(plugin=plugin, config=config, endpoints=endpoints))
     sd_plugin.on_install(sd_plugin.config.get('model_urls', {}), sd_plugin.progress_callback)
-    #sd_plugin.install_plugin()
     return {"message": "Plugin installation started"}
 
 @app.post("/plugins/uninstall")
 def uninstall_plugin():
-    #sd_plugin.uninstall_plugin()  # Assuming this method triggers the on_uninstall logic
     sd_plugin.on_uninstall(sd_plugin.progress_callback)
     return {"message": "Plugin uninstallation started"}
 
