@@ -10,7 +10,7 @@ plugin = {
     "model_memory": 3000
 }
 config = {
-    "model_name": "runwayml/stable-diffusion-v1-5",
+    "model_name": "runwayml/stable-diffusion-v1-5", # "options": ["runwayml/stable-diffusion-v1-5", "stabilityai/sdxl-turbo"]},
     "model_dtype": "fp32" if sys.platform == "darwin" else "fp16",
     "loras": [],
     "inverters": [],
