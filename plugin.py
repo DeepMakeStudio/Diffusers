@@ -46,6 +46,8 @@ async def startup_event(plugin_name: str):
         print("Successfully started up")
         print(sd_plugin.plugin_name)
         sd_plugin.notify_main_system_of_startup("True")
+        return {"status": "Success", "detail": "Plugin started successfully"}
+
     except Exception as e:
         sd_plugin.notify_main_system_of_startup("False")
 
