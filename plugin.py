@@ -53,7 +53,6 @@ def set_model():
     global sd_plugin
     args = {"plugin": plugin, "config": config, "endpoints": endpoints}
     sd_plugin = SD(Namespace(**args))
-    sd_plugin.on_install()
     sd_plugin.set_model()
     # try:
     # sd_plugin.set_model(args["model_name"], dtype=args["model_dtype"])
