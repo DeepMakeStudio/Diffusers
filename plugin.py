@@ -16,6 +16,8 @@ from compel import Compel, ReturnedEmbeddingsType
 from plugin import Plugin, fetch_image, store_image
 from .config import plugin, config, endpoints
 import numpy as np
+import re
+
 app = FastAPI()
 
 def check_model():
@@ -108,6 +110,7 @@ class SD(Plugin):
     def __init__(self, arguments: "Namespace") -> None:
         super().__init__(arguments)
         self.plugin_name = "Diffusers"
+        self.loras = {}
 
     def load_lora_weights(self, pipeline, checkpoint_path, multiplier=1):
         if self.type == "xl":
@@ -254,6 +257,47 @@ class SD(Plugin):
         if seed is not None:
             generator = torch.manual_seed(seed)
         return embed_prompt, generator
+    
+    def parse_prompt(self, pipeline, prompt):
+
+        # Replace %2F with / in prompt from HTTP
+        prompt = re.sub("%2F", "/", prompt)
+        
+        split = re.split("<lora:", prompt, 1)
+        # Parsing for single lora
+        if len(split) == 1:
+            return prompt
+        prompt_start, temp = re.split("<lora:", prompt, 1)
+        lora_info, prompt_end = re.split(">", temp, 1)
+        lora_name, lora_weight = lora_info.split(":")
+        new_prompt = prompt_start + prompt_end
+
+        # If the lora is already loaded with the same weight, return immediately
+        if lora_name in self.loras.keys() and self.loras[lora_name] == lora_weight:
+            return new_prompt
+        
+        # Cache lora info and load the lora weights
+        self.loras[lora_name] = lora_weight
+        pipeline.unload_lora_weights()
+
+        # Return to base model weights
+        # pipeline.unfuse_lora()
+        if "/" in lora_name:
+            author, repo, weight_name = lora_name.split("/")
+            hf_repo = "/".join([author, repo])
+            pipeline.load_lora_weights(hf_repo, weight_name=weight_name, cross_attention_kwargs={"scale": float(lora_weight)})
+            # pipeline.load_lora_weights(hf_repo, weight_name=weight_name)
+        else:
+            pipeline.load_lora_weights("loras", weight_name=lora_name,  cross_attention_kwargs={"scale": float(lora_weight)})
+            # pipeline.load_lora_weights(".", weight_name=lora_name)
+        # print(f"Loaded LoRA weights for {lora_name}")
+        # # pipeline.fuse_lora(lora_scale=float(lora_weight))
+        # print(f"Fused LoRA weights for {lora_name} with weight {lora_weight}")
+        # pipeline.unload_lora_weights()
+        # print(f"Unloaded LoRA weights for {lora_name}")
+
+
+        return new_prompt
 
     def _predict(self, text, seed = None, iterations=20, height=512, width=512, guidance_scale=7.0) -> None:
         """ Predict from the loaded frames.
@@ -261,9 +305,13 @@ class SD(Plugin):
         With a threading lock (to prevent stacking), run the selected faces through the Faceswap
         model predict function and add the output to :attr:`predicted`
         """
+        text = self.parse_prompt(self.tti, text)
+        print(text)
         embed_prompt, generator = self.prep_inputs(seed, text) 
         if self.type == "xl":
             conditioning, pooled = embed_prompt
+            print("XL inference")
+
             image =  self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
         else:
             image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
