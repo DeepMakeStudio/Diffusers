@@ -53,6 +53,7 @@ def set_model():
     global sd_plugin
     args = {"plugin": plugin, "config": config, "endpoints": endpoints}
     sd_plugin = SD(Namespace(**args))
+    sd_plugin.set_model()
     # try:
     # sd_plugin.set_model(args["model_name"], dtype=args["model_dtype"])
     model_name = sd_plugin.config["model_name"]
@@ -105,9 +106,7 @@ class SD(Plugin):
     Prediction inference.
     """
     def __init__(self, arguments: "Namespace") -> None:
-        super().__init__(arguments)
-        self.plugin_name = "Diffusers"
-        self.set_model()
+        super().__init__(arguments, plugin_name = "Diffusers")
 
     def load_lora_weights(self, pipeline, checkpoint_path, multiplier=1):
         if self.type == "xl":
@@ -180,6 +179,9 @@ class SD(Plugin):
         for lora, multiplier in config['loras']:
             self.load_lora_weights(self.tti, lora, multiplier=multiplier)
         return pipeline
+    
+    def on_install(self, progress_callback=None):
+        set_model()
 
     def set_model(self) -> None:
         """
@@ -292,3 +294,10 @@ class SD(Plugin):
         embed_prompt, generator = self.prep_inputs(seed, prompt)
         output_img = self.controlpipe(prompt_embeds=embed_prompt, generator=generator, image = image, num_inference_steps=25).images[0]
         return output_img
+
+    def on_install(self, model_urls=None):
+        dtype = self.config["model_dtype"]
+
+        self.notify_main_system_of_installation(0, "Starting download of runwayml stable-diffusion v1 5")
+        AutoPipelineForText2Image.from_pretrained("runwayml/stable-diffusion-v1-5", torch_dtype=torch.float32 if dtype == "fp32" else torch.float16, variant=dtype)
+        self.notify_main_system_of_installation(100, "Download of runwayml stable diffusion v1 5 complete")
