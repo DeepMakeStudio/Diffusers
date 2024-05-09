@@ -262,16 +262,32 @@ class SD(Plugin):
 
         # Replace %2F with / in prompt from HTTP TODO: Find a better way to handle this
         prompt = re.sub("%2F", "/", prompt)
-        
+        new_prompt = prompt
+
+        print("Parsing for loras")
         split = re.split("<lora:", prompt, 1)
-        # Parsing for single lora
         if len(split) == 1:
             if len(self.loras) == 1:
                 pipeline.unfuse_lora()
             elif len(self.loras) > 1:
                 self.set_model()
-            return prompt
+        else:
+            new_prompt = self.parse_loras(pipeline, prompt)
+
+        split = re.split("<ti:", new_prompt, 1)
+        if len(split) == 1:
+            return new_prompt
         
+        print("Parsing for textual inversion")
+        prompt_start, temp = re.split("<ti:", new_prompt, 1)
+        ti_info, prompt_end = re.split(">", temp, 1)
+        ti_name,  token= ti_info.split(":")
+        pipeline.load_textual_inversion("ti", weight_name=ti_name, token=token)
+        new_prompt = prompt_start + f"<{token}>" + prompt_end
+        
+        return new_prompt
+    
+    def parse_loras(self, pipeline, prompt):
         # Parsing for multiple loras
         new_prompt = prompt
         lora_dict = {}
@@ -319,8 +335,6 @@ class SD(Plugin):
         # Fuse Loras
         pipeline.fuse_lora(adapter_names=adapter_name_list, lora_scale=1.0)
         pipeline.unload_lora_weights()
-
-
         return new_prompt
 
     def _predict(self, text, seed = None, iterations=20, height=512, width=512, guidance_scale=7.0) -> None:
