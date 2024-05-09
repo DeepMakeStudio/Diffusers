@@ -279,11 +279,21 @@ class SD(Plugin):
             return new_prompt
         
         print("Parsing for textual inversion")
-        prompt_start, temp = re.split("<ti:", new_prompt, 1)
-        ti_info, prompt_end = re.split(">", temp, 1)
-        ti_name,  token= ti_info.split(":")
-        pipeline.load_textual_inversion("ti", weight_name=ti_name, token=token)
-        new_prompt = prompt_start + f"<{token}>" + prompt_end
+        #
+        while re.search("<ti:", new_prompt):
+            prompt_start, temp = re.split("<ti:", new_prompt, 1)
+            ti_info, prompt_end = re.split(">", temp, 1)
+            ti_name,  token= ti_info.split(":")
+            if self.type == "xl":
+                state_dict = load_file(os.path.join("ti", ti_name))
+                token0 = "<" + token + "0>"
+                token1 = "<" + token + "1>"
+                pipeline.load_textual_inversion(state_dict["clip_l"], token=[token0, token1], text_encoder=pipeline.text_encoder, tokenizer=pipeline.tokenizer)
+                pipeline.load_textual_inversion(state_dict["clip_g"], token=[token0, token1], text_encoder=pipeline.text_encoder_2, tokenizer=pipeline.tokenizer_2)
+                new_prompt = prompt_start + token0 + token1 + prompt_end
+            else:
+                pipeline.load_textual_inversion("ti", weight_name=ti_name, token=token)
+                new_prompt = prompt_start + f"<{token}>" + prompt_end
         
         return new_prompt
     
