@@ -19,6 +19,7 @@ dependencies:
       - huey
       - idna
       - opencv-python
+      - peft
       - psutil
       - pydantic
       - pymemcache

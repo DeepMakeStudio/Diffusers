@@ -18,6 +18,7 @@ dependencies:
       - huey
       - idna
       - opencv-python
+      - peft
       - pydantic
       - redis
       - requests

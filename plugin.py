@@ -260,41 +260,65 @@ class SD(Plugin):
     
     def parse_prompt(self, pipeline, prompt):
 
-        # Replace %2F with / in prompt from HTTP
+        # Replace %2F with / in prompt from HTTP TODO: Find a better way to handle this
         prompt = re.sub("%2F", "/", prompt)
         
         split = re.split("<lora:", prompt, 1)
         # Parsing for single lora
         if len(split) == 1:
+            if len(self.loras) == 1:
+                pipeline.unfuse_lora()
+            elif len(self.loras) > 1:
+                self.set_model()
             return prompt
-        prompt_start, temp = re.split("<lora:", prompt, 1)
-        lora_info, prompt_end = re.split(">", temp, 1)
-        lora_name, lora_weight = lora_info.split(":")
-        new_prompt = prompt_start + prompt_end
+        
+        # Parsing for multiple loras
+        new_prompt = prompt
+        lora_dict = {}
+        print("Parsing prompt")
+        while re.search("<lora:", new_prompt):
+            prompt_start, temp = re.split("<lora:", new_prompt, 1)
+            lora_info, prompt_end = re.split(">", temp, 1)
+            lora_name, lora_weight = lora_info.split(":")
+            lora_dict[lora_name] = float(lora_weight)
+            new_prompt = prompt_start + prompt_end
 
-        # If the lora is already loaded with the same weight, return immediately
-        if lora_name in self.loras.keys() and self.loras[lora_name] == lora_weight:
+        # If the lora structure is the same, return immediately
+        if lora_dict == self.loras:
             return new_prompt
+    
+        # Unload the current lora weights
+        if len(self.loras) == 1:
+            pipeline.unfuse_lora()
+        elif len(self.loras) > 1:
+            self.set_model()
         
         # Cache lora info and load the lora weights
-        self.loras[lora_name] = lora_weight
-        pipeline.unload_lora_weights()
+        self.loras = lora_dict
+        adapter_name = 0
+        adapter_name_list = []
+        adapter_weight_list = []
 
-        # Return to base model weights
-        # pipeline.unfuse_lora()
-        if "/" in lora_name:
-            author, repo, weight_name = lora_name.split("/")
-            hf_repo = "/".join([author, repo])
-            pipeline.load_lora_weights(hf_repo, weight_name=weight_name, cross_attention_kwargs={"scale": float(lora_weight)})
-            # pipeline.load_lora_weights(hf_repo, weight_name=weight_name)
-        else:
-            pipeline.load_lora_weights("loras", weight_name=lora_name,  cross_attention_kwargs={"scale": float(lora_weight)})
-            # pipeline.load_lora_weights(".", weight_name=lora_name)
-        # print(f"Loaded LoRA weights for {lora_name}")
-        # # pipeline.fuse_lora(lora_scale=float(lora_weight))
-        # print(f"Fused LoRA weights for {lora_name} with weight {lora_weight}")
-        # pipeline.unload_lora_weights()
-        # print(f"Unloaded LoRA weights for {lora_name}")
+        print("Loading LoRA weights")
+        # Load the lora weights based on the lora_dict information and prepare adapter info
+        for lora_name, lora_weight in lora_dict.items():
+            if "/" in lora_name:
+                author, repo, weight_name = lora_name.split("/")
+                hf_repo = "/".join([author, repo])
+                pipeline.load_lora_weights(hf_repo, weight_name=weight_name, adapter_name=str(adapter_name))
+                # pipeline.load_lora_weights(hf_repo, weight_name=weight_name)
+            else:
+                pipeline.load_lora_weights("loras", weight_name=lora_name,  adapter_name=str(adapter_name))
+            adapter_name_list.append(str(adapter_name))
+            adapter_weight_list.append(lora_weight)
+            adapter_name += 1
+        print("Merging LoRA weights")
+        # Set the adapters
+        pipeline.set_adapters(adapter_name_list, adapter_weight_list)
+        print("Fusing Loras")
+        # Fuse Loras
+        pipeline.fuse_lora(adapter_names=adapter_name_list, lora_scale=1.0)
+        pipeline.unload_lora_weights()
 
 
         return new_prompt
