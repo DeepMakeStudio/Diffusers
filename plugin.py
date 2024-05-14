@@ -64,6 +64,7 @@ def set_model():
 @app.get("/execute/{prompt}")
 def execute(prompt: str, seed: int = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, control_image: str = None):
     # check_model()
+    # prompt = json_data["prompt"]
     if control_image is None:
         im = sd_plugin._predict(prompt, seed=seed, iterations=iterations, height=height, width=width, guidance_scale=guidance_scale)
     else:
@@ -85,6 +86,16 @@ def execute2(text: str, img: str, seed = None, iterations: int = 20, height: int
     image = Image.open(BytesIO(imagebytes))
     image = image.convert("RGB")
     im = sd_plugin.img_to_img_predict(text, image, seed=seed, iterations=iterations, height=height, width=width, guidance_scale=guidance_scale, strength=strength)
+    output = BytesIO()
+    im.save(output, format="PNG")
+    image_id = store_image(output.getvalue())
+
+    return {"status": "Success", "output_img": image_id}
+
+@app.get("/prompt_travel/{prompts}")
+def prompt_travel(prompts: str, iterations: int = 25, height: int = 512, width: int = 512):
+    prompts = list(prompts)
+    im = sd_plugin.prompt_travel_inference(sd_plugin.tti, prompts, iterations=iterations, height=height, width=width)
     output = BytesIO()
     im.save(output, format="PNG")
     image_id = store_image(output.getvalue())
@@ -268,15 +279,46 @@ class SD(Plugin):
         model predict function and add the output to :attr:`predicted`
         """
         text = self.parse_prompt(self.tti, text)
-        print(text)
-        embed_prompt, generator = self.prep_inputs(seed, text) 
+        if isinstance(text, tuple):
+            text, timestep_table = text
+        elif isinstance(text, str):
+            text = [text]
+            timestep_table = None
+        # timestep_table = None
+        embed_prompts = []
+        for prompt in text:
+            embed_prompt, generator = self.prep_inputs(seed, prompt) 
+            embed_prompts.append(embed_prompt)
+        # print(len(text), embed_prompt.shape)
+        # text = ["cow", "horse"]
+        # timestep_table = [0, 8]
+
+    
         if self.type == "xl":
             conditioning, pooled = embed_prompt
             print("XL inference")
 
             image =  self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
         else:
-            image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
+            image = None
+            for i in range(len(text)):
+                embed_prompt = embed_prompts[i]
+                start_step = timestep_table[i] if timestep_table is not None else None
+                print(len(text), i, start_step, timestep_table)
+                if i < len(text) - 1:
+                    end_step = timestep_table[i+1] if timestep_table is not None else None
+                else:
+                    end_step = None
+                if i == len(text) - 1:
+                    image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, start_step=start_step, latents=image).images[0]
+                elif i == 0:
+                    image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", end_step=end_step)
+                elif i < len(text) - 1:
+                    image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type= "latent", end_step=end_step,start_step=start_step, latents=image)
+                
+            # image = self.tti(prompt="horse", generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, end_step=8, output_type="latent")
+            # image = self.tti(prompt="cow", generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, start_step=8, latents=image).images[0]
+
         return image
 
     def img_to_img_predict(self, text, image, seed=None, iterations=25, height=512, width=512, guidance_scale=7.0, strength=0.75):
@@ -331,12 +373,34 @@ class PromptParser():
             new_prompt = self.parse_loras(pipeline, prompt)
 
         split = re.split("<ti:", new_prompt, 1)
-        if len(split) == 1:
-            return new_prompt
-        
+        if len(split) != 1:
+            new_prompt = self.parse_ti(pipeline, new_prompt)
         print("Parsing for textual inversion")
-        while re.search("<ti:", new_prompt):
-            prompt_start, temp = re.split("<ti:", new_prompt, 1)
+
+        split = re.split("\[", new_prompt, 1)
+        if len(split) != 1:
+            new_prompt, timestep_table = self.parse_prompt_travel(new_prompt)
+            return new_prompt, timestep_table
+        
+        return new_prompt
+    
+    def parse_prompt_travel(self, prompt):
+        prompt_list = []
+        timestep_table = [0]
+        prompt_start, temp = re.split("\[", prompt, 1)
+        phrase1, phrase2, timestep = temp.split(":")
+        timestep, prompt_end = re.split("\]", timestep, 1)
+        timestep_table.append(int(timestep))
+        prompt1 = prompt_start + phrase1 + prompt_end
+        prompt2 = prompt_start + phrase2 + prompt_end
+        prompt_list.append(prompt1)
+        prompt_list.append(prompt2)
+
+        return prompt_list, timestep_table
+    
+    def parse_ti(self, pipeline, prompt):
+        while re.search("<ti:", prompt):
+            prompt_start, temp = re.split("<ti:", prompt, 1)
             ti_info, prompt_end = re.split(">", temp, 1)
             ti_name, token = ti_info.split(":")
             if self.type == "xl":
@@ -345,12 +409,10 @@ class PromptParser():
                 token1 = "<" + token + "1>"
                 pipeline.load_textual_inversion(state_dict["clip_l"], token=[token0, token1], text_encoder=pipeline.text_encoder, tokenizer=pipeline.tokenizer)
                 pipeline.load_textual_inversion(state_dict["clip_g"], token=[token0, token1], text_encoder=pipeline.text_encoder_2, tokenizer=pipeline.tokenizer_2)
-                new_prompt = prompt_start + token0 + token1 + prompt_end
+                prompt = prompt_start + token0 + token1 + prompt_end
             else:
                 pipeline.load_textual_inversion("ti", weight_name=ti_name, token=f"<{token}>")
-                new_prompt = prompt_start + f"<{token}>" + prompt_end
-        
-        return new_prompt
+                prompt = prompt_start + f"<{token}>" + prompt_end
     
     def parse_loras(self, pipeline, prompt):
         # Parsing for multiple loras
