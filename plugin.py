@@ -110,7 +110,7 @@ class SD(Plugin):
     def __init__(self, arguments: "Namespace") -> None:
         super().__init__(arguments)
         self.plugin_name = "Diffusers"
-        self.loras = {}
+        self.pp = PromptParser()
 
     def load_lora_weights(self, pipeline, checkpoint_path, multiplier=1):
         if self.type == "xl":
@@ -241,6 +241,9 @@ class SD(Plugin):
         elif torch.cuda.is_available():
             self.tti.to("cuda", torch.float32 if dtype == "fp32" else torch.float16)
             self.iti.to("cuda", torch.float32 if dtype == "fp32" else torch.float16)
+    
+    def parse_prompt(self, pipeline, prompt):
+        return self.pp.parse_prompt(pipeline, prompt)
 
     def prep_inputs(self, seed, text):
         if self.type == "xl":
@@ -257,7 +260,60 @@ class SD(Plugin):
         if seed is not None:
             generator = torch.manual_seed(seed)
         return embed_prompt, generator
-    
+
+    def _predict(self, text, seed = None, iterations=20, height=512, width=512, guidance_scale=7.0) -> None:
+        """ Predict from the loaded frames.
+
+        With a threading lock (to prevent stacking), run the selected faces through the Faceswap
+        model predict function and add the output to :attr:`predicted`
+        """
+        text = self.parse_prompt(self.tti, text)
+        print(text)
+        embed_prompt, generator = self.prep_inputs(seed, text) 
+        if self.type == "xl":
+            conditioning, pooled = embed_prompt
+            print("XL inference")
+
+            image =  self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
+        else:
+            image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
+        return image
+
+    def img_to_img_predict(self, text, image, seed=None, iterations=25, height=512, width=512, guidance_scale=7.0, strength=0.75):
+        embed_prompt, generator = self.prep_inputs(seed, text)
+        if self.type == "xl":
+            conditioning, pooled = embed_prompt
+            output_img = self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image=image, generator=generator, num_inference_steps=iterations, guidance_scale=guidance_scale).images[0]
+        else:
+            output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, guidance_scale=guidance_scale,strength=strength).images[0]
+        output_img = output_img.resize((height, width))
+        return output_img
+
+    def lora(self):
+        for lora, multiplier in self.config['loras']:
+            self.tti.load_lora_weights(".", weight_name=lora)
+            self.tti.fuse_lora(lora_scale=multiplier)
+
+    def load_textual_inversion(self):
+        for inverter in self.config['inverters']:
+            self.tti.load_textual_inversion(inverter)
+
+    def controlnet_predict(self, prompt: str, image, seed):
+        embed_prompt, generator = self.prep_inputs(seed, prompt)
+        output_img = self.controlpipe(prompt_embeds=embed_prompt, generator=generator, image = image, num_inference_steps=25).images[0]
+        return output_img
+
+    def on_install(self, model_urls=None):
+        dtype = self.config["model_dtype"]
+
+        self.notify_main_system_of_installation(0, "Starting download of runwayml stable-diffusion v1 5")
+        AutoPipelineForText2Image.from_pretrained("runwayml/stable-diffusion-v1-5", torch_dtype=torch.float32 if dtype == "fp32" else torch.float16, variant=dtype)
+        self.notify_main_system_of_installation(100, "Download of runwayml stable diffusion v1 5 complete")
+
+class PromptParser():
+    def __init__(self):
+        self.loras = {}
+
     def parse_prompt(self, pipeline, prompt):
 
         # Replace %2F with / in prompt from HTTP TODO: Find a better way to handle this
@@ -279,11 +335,10 @@ class SD(Plugin):
             return new_prompt
         
         print("Parsing for textual inversion")
-        #
         while re.search("<ti:", new_prompt):
             prompt_start, temp = re.split("<ti:", new_prompt, 1)
             ti_info, prompt_end = re.split(">", temp, 1)
-            ti_name,  token= ti_info.split(":")
+            ti_name, token = ti_info.split(":")
             if self.type == "xl":
                 state_dict = load_file(os.path.join("ti", ti_name))
                 token0 = "<" + token + "0>"
@@ -292,7 +347,7 @@ class SD(Plugin):
                 pipeline.load_textual_inversion(state_dict["clip_g"], token=[token0, token1], text_encoder=pipeline.text_encoder_2, tokenizer=pipeline.tokenizer_2)
                 new_prompt = prompt_start + token0 + token1 + prompt_end
             else:
-                pipeline.load_textual_inversion("ti", weight_name=ti_name, token=token)
+                pipeline.load_textual_inversion("ti", weight_name=ti_name, token=f"<{token}>")
                 new_prompt = prompt_start + f"<{token}>" + prompt_end
         
         return new_prompt
@@ -345,53 +400,5 @@ class SD(Plugin):
         # Fuse Loras
         pipeline.fuse_lora(adapter_names=adapter_name_list, lora_scale=1.0)
         pipeline.unload_lora_weights()
+
         return new_prompt
-
-    def _predict(self, text, seed = None, iterations=20, height=512, width=512, guidance_scale=7.0) -> None:
-        """ Predict from the loaded frames.
-
-        With a threading lock (to prevent stacking), run the selected faces through the Faceswap
-        model predict function and add the output to :attr:`predicted`
-        """
-        text = self.parse_prompt(self.tti, text)
-        print(text)
-        embed_prompt, generator = self.prep_inputs(seed, text) 
-        if self.type == "xl":
-            conditioning, pooled = embed_prompt
-            print("XL inference")
-
-            image =  self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
-        else:
-            image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
-        return image
-
-    def img_to_img_predict(self, text, image, seed=None, iterations=25, height=512, width=512, guidance_scale=7.0, strength=0.75):
-        embed_prompt, generator = self.prep_inputs(seed, text)
-        if self.type == "xl":
-            conditioning, pooled = embed_prompt
-            output_img = self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image=image, generator=generator, num_inference_steps=iterations, guidance_scale=guidance_scale).images[0]
-        else:
-            output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, guidance_scale=guidance_scale,strength=strength).images[0]
-        output_img = output_img.resize((height, width))
-        return output_img
-
-    def lora(self):
-        for lora, multiplier in self.config['loras']:
-            self.tti.load_lora_weights(".", weight_name=lora)
-            self.tti.fuse_lora(lora_scale=multiplier)
-
-    def load_textual_inversion(self):
-        for inverter in self.config['inverters']:
-            self.tti.load_textual_inversion(inverter)
-
-    def controlnet_predict(self, prompt: str, image, seed):
-        embed_prompt, generator = self.prep_inputs(seed, prompt)
-        output_img = self.controlpipe(prompt_embeds=embed_prompt, generator=generator, image = image, num_inference_steps=25).images[0]
-        return output_img
-
-    def on_install(self, model_urls=None):
-        dtype = self.config["model_dtype"]
-
-        self.notify_main_system_of_installation(0, "Starting download of runwayml stable-diffusion v1 5")
-        AutoPipelineForText2Image.from_pretrained("runwayml/stable-diffusion-v1-5", torch_dtype=torch.float32 if dtype == "fp32" else torch.float16, variant=dtype)
-        self.notify_main_system_of_installation(100, "Download of runwayml stable diffusion v1 5 complete")
