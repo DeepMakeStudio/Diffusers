@@ -29,4 +29,4 @@ dependencies:
       - invisible_watermark
       - transformers
       - psutil
-      - pysimplegui<5.0.0
+      - "pysimplegui<5.0.0"
