@@ -16,6 +16,8 @@ from compel import Compel, ReturnedEmbeddingsType
 from plugin import Plugin, fetch_image, store_image
 from .config import plugin, config, endpoints
 import numpy as np
+from .download_gui import LoadingBar
+from huggingface_hub import scan_cache_dir
 app = FastAPI()
 
 def check_model():
@@ -189,6 +191,11 @@ class SD(Plugin):
         """
         model_path = self.config["model_name"]
         dtype = self.config["model_dtype"]
+        cached_models = scan_cache_dir()
+        if not any(model_path in repo_info.repo_id for repo_info in cached_models.repos):
+            load_bar = LoadingBar()
+            load_bar.start(model_path, torch.float32 if dtype == "fp32" else torch.float16, dtype)
+
         if os.path.exists(model_path):
             if "xl" in model_path.lower():
                 self.type = "xl"
