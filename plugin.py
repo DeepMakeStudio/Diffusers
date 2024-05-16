@@ -55,17 +55,19 @@ async def startup_event():
 def set_model():
     global sd_plugin
     args = {"plugin": plugin, "config": config, "endpoints": endpoints}
-    sd_plugin = SD(Namespace(**args))
+    pp = PromptParser(Namespace(**args))
+    sd_plugin = SD(Namespace(**args), pp)
     sd_plugin.set_model()
     # try:
     # sd_plugin.set_model(args["model_name"], dtype=args["model_dtype"])
     model_name = sd_plugin.config["model_name"]
     return {"status": "Success", "detail": f"Model set successfully to {model_name}"}
 
-@app.get("/execute/{prompt}")
-def execute(prompt: str, seed: int = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, control_image: str = None):
+@app.put("/execute/")
+def execute(json_data: dict, seed: int = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, control_image: str = None):
     # check_model()
-    # prompt = json_data["prompt"]
+    prompt = json_data["prompt"]
+    print(seed)
     if control_image is None:
         im = sd_plugin._predict(prompt, seed=seed, iterations=iterations, height=height, width=width, guidance_scale=guidance_scale)
     else:
@@ -93,16 +95,6 @@ def execute2(text: str, img: str, seed = None, iterations: int = 20, height: int
 
     return {"status": "Success", "output_img": image_id}
 
-@app.get("/prompt_travel/{prompts}")
-def prompt_travel(prompts: str, iterations: int = 25, height: int = 512, width: int = 512):
-    prompts = list(prompts)
-    im = sd_plugin.prompt_travel_inference(sd_plugin.tti, prompts, iterations=iterations, height=height, width=width)
-    output = BytesIO()
-    im.save(output, format="PNG")
-    image_id = store_image(output.getvalue())
-
-    return {"status": "Success", "output_img": image_id}
-
 def self_terminate():
     time.sleep(3)
     parent = psutil.Process(psutil.Process(os.getpid()).ppid())
@@ -119,10 +111,10 @@ class SD(Plugin):
     """
     Prediction inference.
     """
-    def __init__(self, arguments: "Namespace") -> None:
+    def __init__(self, arguments: "Namespace", pp) -> None:
         super().__init__(arguments)
         self.plugin_name = "Diffusers"
-        self.pp = PromptParser()
+        self.pp = pp
 
     def load_lora_weights(self, pipeline, checkpoint_path, multiplier=1):
         if self.type == "xl":
@@ -244,8 +236,8 @@ class SD(Plugin):
         else:
             self.controlpipe = None
 
-        self.lora()
-        self.load_textual_inversion()
+        # self.lora()
+        # self.load_textual_inversion()
         self.tti.to("cpu", torch.float32 if dtype == "fp32" else torch.float16)
         if sys.platform == "darwin":
             self.tti.to("mps", torch.float32 if dtype == "fp32" else torch.float16)
@@ -377,8 +369,10 @@ class SD(Plugin):
         self.notify_main_system_of_installation(100, "Download of runwayml stable diffusion v1 5 complete")
 
 class PromptParser():
-    def __init__(self):
+    def __init__(self, args):
         self.loras = {}
+        self.loras_path = args.config["loras_path"]
+        self.textual_embedding_path = args.config["textual_embedding_path"]
 
     def parse_prompt(self, pipeline, prompt):
 
@@ -446,7 +440,7 @@ class PromptParser():
             ti_info, prompt_end = re.split(">", temp, 1)
             ti_name, token = ti_info.split(":")
             if self.type == "xl":
-                state_dict = load_file(os.path.join("ti", ti_name))
+                state_dict = load_file(os.path.join(self.textual_embedding_path, ti_name))
                 token0 = "<" + token + "0>"
                 token1 = "<" + token + "1>"
                 pipeline.load_textual_inversion(state_dict["clip_l"], token=[token0, token1], text_encoder=pipeline.text_encoder, tokenizer=pipeline.tokenizer)
@@ -493,7 +487,7 @@ class PromptParser():
                 pipeline.load_lora_weights(hf_repo, weight_name=weight_name, adapter_name=str(adapter_name))
                 # pipeline.load_lora_weights(hf_repo, weight_name=weight_name)
             else:
-                pipeline.load_lora_weights("loras", weight_name=lora_name,  adapter_name=str(adapter_name))
+                pipeline.load_lora_weights(self.loras_path, weight_name=lora_name,  adapter_name=str(adapter_name))
             adapter_name_list.append(str(adapter_name))
             adapter_weight_list.append(lora_weight)
             adapter_name += 1

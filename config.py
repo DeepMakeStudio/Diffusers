@@ -10,8 +10,8 @@ plugin = {
 config = {
     "model_name": "runwayml/stable-diffusion-v1-5",
     "model_dtype": "fp32" if sys.platform == "darwin" else "fp16",
-    "loras": [],
-    "inverters": [],
+    "loras_path": "loras",
+    "textual_embedding_path": "ti",
     "scheduler": "pndm",
     "controlnet": "lllyasviel/sd-controlnet-canny"
 }
