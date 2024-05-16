@@ -18,6 +18,7 @@ config = {
 endpoints = {
     "generate_image": {
         "call": "execute",
+        "method": "PUT",
         "inputs": {
             "prompt": "Text",
             "seed": "Int(default=None, optional=true)",
