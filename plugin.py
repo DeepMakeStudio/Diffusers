@@ -47,7 +47,8 @@ async def startup_event():
         set_model()
         print("Successfully started up")
         sd_plugin.notify_main_system_of_startup("True")
-    except:
+    except Exception as e:
+        raise e
         sd_plugin.notify_main_system_of_startup("False")
 
 @app.get("/set_model/")
@@ -388,13 +389,30 @@ class PromptParser():
         prompt_list = []
         timestep_table = [0]
         prompt_start, temp = re.split("\[", prompt, 1)
-        phrase1, phrase2, timestep = temp.split(":")
+        # [prompt1:prompt2:step:prompt3:step]
+        phrase1, phrase2, timestep = re.split(":", temp, 2)
         timestep, prompt_end = re.split("\]", timestep, 1)
-        timestep_table.append(int(timestep))
+        timestep_table.append(int(timestep.split(":")[0]))
         prompt1 = prompt_start + phrase1 + prompt_end
         prompt2 = prompt_start + phrase2 + prompt_end
         prompt_list.append(prompt1)
         prompt_list.append(prompt2)
+        temp = timestep
+        if re.search(":", temp):
+            timestep, temp = re.split(":", temp, 1)
+        print(temp)
+        while re.search(":", temp):
+            phrase, timestep = re.split(":", temp, 1)
+            print(phrase, timestep)
+            if re.search(":", timestep):
+                timestep, temp = re.split(":", timestep, 1)
+            else:
+                temp = ""
+            timestep_table.append(int(timestep.split(":")[0]))
+            prompt_list.append(prompt_start + phrase + prompt_end)
+        print(prompt_list, timestep_table)
+        
+       
 
         return prompt_list, timestep_table
     
