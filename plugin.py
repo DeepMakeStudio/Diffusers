@@ -1,6 +1,6 @@
 import os
 from argparse import Namespace
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from PIL import Image
 
 from io import BytesIO
@@ -48,7 +48,6 @@ async def startup_event():
         print("Successfully started up")
         sd_plugin.notify_main_system_of_startup("True")
     except Exception as e:
-        raise e
         sd_plugin.notify_main_system_of_startup("False")
 
 @app.get("/set_model/")
@@ -67,7 +66,6 @@ def set_model():
 def execute(json_data: dict, seed: int = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, control_image: str = None):
     # check_model()
     prompt = json_data["prompt"]
-    print(seed)
     if control_image is None:
         im = sd_plugin._predict(prompt, seed=seed, iterations=iterations, height=height, width=width, guidance_scale=guidance_scale)
     else:
@@ -440,14 +438,24 @@ class PromptParser():
             ti_info, prompt_end = re.split(">", temp, 1)
             ti_name, token = ti_info.split(":")
             if self.type == "xl":
-                state_dict = load_file(os.path.join(self.textual_embedding_path, ti_name))
+                if "/" in ti_name:
+                    author, repo, weight_name = ti_name.split("/")
+                    hf_repo = "/".join([author, repo])
+                    state_dict = load_file(os.path.join(hf_repo, weight_name))
+                else:
+                    state_dict = load_file(os.path.join(self.textual_embedding_path, ti_name))
                 token0 = "<" + token + "0>"
                 token1 = "<" + token + "1>"
                 pipeline.load_textual_inversion(state_dict["clip_l"], token=[token0, token1], text_encoder=pipeline.text_encoder, tokenizer=pipeline.tokenizer)
                 pipeline.load_textual_inversion(state_dict["clip_g"], token=[token0, token1], text_encoder=pipeline.text_encoder_2, tokenizer=pipeline.tokenizer_2)
                 prompt = prompt_start + token0 + token1 + prompt_end
             else:
-                pipeline.load_textual_inversion("ti", weight_name=ti_name, token=f"<{token}>")
+                if "/" in ti_name:
+                    author, repo, weight_name = ti_name.split("/")
+                    hf_repo = "/".join([author, repo])
+                    pipeline.load_textual_inversion(hf_repo, weight_name=weight_name, token=f"<{token}>")
+                else:
+                    pipeline.load_textual_inversion(self.textual_embedding_path, weight_name=ti_name, token=f"<{token}>")
                 prompt = prompt_start + f"<{token}>" + prompt_end
     
     def parse_loras(self, pipeline, prompt):
