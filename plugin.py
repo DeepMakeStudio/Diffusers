@@ -287,21 +287,44 @@ class SD(Plugin):
             timestep_table = None
         # timestep_table = None
         embed_prompts = []
-        for prompt in text:
-            embed_prompt, generator = self.prep_inputs(seed, prompt) 
-            embed_prompts.append(embed_prompt)
+
+        if self.type == "xl":
+            pooled_prompts = []
+            for prompt in text:
+                encoded, generator = self.prep_inputs(seed, prompt)
+                embed_prompt, pooled_prompt = encoded
+                embed_prompts.append(embed_prompt)
+                pooled_prompts.append(pooled_prompt)
+        else:
+
+            for prompt in text:
+                embed_prompt, generator = self.prep_inputs(seed, prompt) 
+                embed_prompts.append(embed_prompt)
         # print(len(text), embed_prompt.shape)
         # text = ["cow", "horse"]
         # timestep_table = [0, 8]
 
-    
+        image = None
         if self.type == "xl":
-            conditioning, pooled = embed_prompt
-            print("XL inference")
+            # conditioning, pooled = embed_prompt
+            # print("XL inference")
+            for i in range(len(text)):
+                conditioning = embed_prompts[i]
+                pooled = pooled_prompts[i]
+                start_step = timestep_table[i] if timestep_table is not None else None
 
-            image =  self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
+                if i < len(text) - 1:
+                    end_step = timestep_table[i+1] if timestep_table is not None else None
+                else:
+                    end_step = None
+                if i == len(text) - 1:
+                    image =  self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, start_step=start_step, latents=image).images[0]
+                elif i == 0:
+                    image = self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", end_step=end_step)
+                elif i < len(text) - 1:
+                    image = self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type= "latent", end_step=end_step, start_step=start_step, latents=image)
+            # image =  self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
         else:
-            image = None
             for i in range(len(text)):
                 embed_prompt = embed_prompts[i]
                 start_step = timestep_table[i] if timestep_table is not None else None
@@ -372,12 +395,13 @@ class PromptParser():
                 self.set_model()
         else:
             new_prompt = self.parse_loras(pipeline, prompt)
+        print("Parsing for textual inversion")
 
         split = re.split("<ti:", new_prompt, 1)
         if len(split) != 1:
             new_prompt = self.parse_ti(pipeline, new_prompt)
-        print("Parsing for textual inversion")
 
+        print("Parsing for prompt travel")
         split = re.split("\[", new_prompt, 1)
         if len(split) != 1:
             new_prompt, timestep_table = self.parse_prompt_travel(new_prompt)
