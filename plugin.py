@@ -244,95 +244,125 @@ class SD(Plugin):
             self.tti.to("cuda", torch.float32 if dtype == "fp32" else torch.float16)
             self.iti.to("cuda", torch.float32 if dtype == "fp32" else torch.float16)
     
-    def parse_prompt(self, pipeline, prompt):
-        return self.pp.parse_prompt(pipeline, prompt)
+    def prep_inputs(self, seed, text, compel_proc):
+        print(f"prep_inputs: seed={seed}, text={text}")
 
-    def prep_inputs(self, seed, text):
-        if self.type == "xl":
-            compel_proc = Compel(
-                tokenizer=[self.tti.tokenizer, self.tti.tokenizer_2] ,
-                text_encoder=[self.tti.text_encoder, self.tti.text_encoder_2],
-                returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
-                requires_pooled=[False, True]
-                )
-        else:
-            compel_proc = Compel(tokenizer=self.tti.tokenizer, text_encoder=self.tti.text_encoder)
         embed_prompt = compel_proc(text)
+
         generator = None
         if seed is not None:
             generator = torch.manual_seed(seed)
+
         return embed_prompt, generator
+    
+    def apply_weights(self, embeddings, tokenizer, weights, text):
+        input_ids = tokenizer(text, return_tensors='pt').input_ids[0]
+        original_embeddings = embeddings.clone()
+        print(f"Original Embeddings:\n {original_embeddings}")
 
-    def _predict(self, text, seed = None, iterations=20, height=512, width=512, guidance_scale=7.0) -> None:
-        """ Predict from the loaded frames.
+        for word, weight in weights.items():
+            token_ids = self.find_word_indices(word, tokenizer, input_ids)
+            print(f"Word: {word}, Weight: {weight}, Token IDs: {token_ids}")
+            for index in token_ids:
+                if index < embeddings.size(1):
+                    print(f"Applying weight: {weight} to word: {word} at index: {index}")
+                    print(f"Value before applying weight: {embeddings[:, index]}")
+                    embeddings[:, index] *= weight
+                    print(f"Value after applying weight: {embeddings[:, index]}")
 
-        With a threading lock (to prevent stacking), run the selected faces through the Faceswap
-        model predict function and add the output to :attr:`predicted`
-        """
-        text = self.parse_prompt(self.tti, text)
-        if isinstance(text, tuple):
-            text, timestep_table = text
-        elif isinstance(text, str):
-            text = [text]
+        if not torch.equal(original_embeddings, embeddings):
+            print("The embeddings tensor was modified.")
+        else:
+            print("The embeddings tensor was NOT modified.")
+        print("Modified Embeddings:\n", embeddings)
+
+        comparison_result = torch.equal(original_embeddings, embeddings)
+        print(f"Comparison Result: {comparison_result}")
+
+        return embeddings
+
+    def find_word_indices(self, word, tokenizer, input_ids):
+        word_indices = []
+        tokens = tokenizer.convert_ids_to_tokens(input_ids)
+        for idx, token in enumerate(tokens):
+            if word in token:
+                word_indices.append(idx)
+        return word_indices
+
+    def _predict(self, text, seed=None, iterations=20, height=512, width=512, guidance_scale=7.0) -> None:
+        print(f"_predict: text={text}, seed={seed}, iterations={iterations}, height=512, width=512, guidance_scale={guidance_scale}")
+
+        parsed_result, weights = self.pp.parse_prompt(self.tti, text)
+        if isinstance(parsed_result, tuple):
+            text, timestep_table = parsed_result
+        else:
+            text = [parsed_result]
             timestep_table = None
-        # timestep_table = None
+
+        print(f"parse_prompt: new_prompt={text}")
+
         embed_prompts = []
 
         if self.type == "xl":
+            compel_proc = Compel(
+                tokenizer=[self.tti.tokenizer, self.tti.tokenizer_2],
+                text_encoder=[self.tti.text_encoder, self.tti.text_encoder_2],
+                returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
+                requires_pooled=[False, True]
+            )
             pooled_prompts = []
             for prompt in text:
-                encoded, generator = self.prep_inputs(seed, prompt)
+                encoded, generator = self.prep_inputs(seed, prompt, compel_proc)
                 embed_prompt, pooled_prompt = encoded
                 embed_prompts.append(embed_prompt)
                 pooled_prompts.append(pooled_prompt)
         else:
-
+            compel_proc = Compel(tokenizer=self.tti.tokenizer, text_encoder=self.tti.text_encoder)
             for prompt in text:
-                embed_prompt, generator = self.prep_inputs(seed, prompt) 
+                embed_prompt, generator = self.prep_inputs(seed, prompt, compel_proc)
+                print(f"Embeddings before applying weights: {embed_prompt}")
+                if weights:
+                    embed_prompt = self.apply_weights(embed_prompt, self.tti.tokenizer, weights, prompt)
+                print(f"Embeddings after applying weights: {embed_prompt}")
                 embed_prompts.append(embed_prompt)
-        # print(len(text), embed_prompt.shape)
-        # text = ["cow", "horse"]
-        # timestep_table = [0, 8]
+
+        print(f"_predict: embed_prompts={embed_prompts}")
 
         image = None
         if self.type == "xl":
-            # conditioning, pooled = embed_prompt
-            # print("XL inference")
             for i in range(len(text)):
                 conditioning = embed_prompts[i]
                 pooled = pooled_prompts[i]
                 start_step = timestep_table[i] if timestep_table is not None else None
 
                 if i < len(text) - 1:
-                    end_step = timestep_table[i+1] if timestep_table is not None else None
+                    end_step = timestep_table[i + 1] if timestep_table is not None else None
                 else:
                     end_step = None
+
                 if i == len(text) - 1:
-                    image =  self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, start_step=start_step, latents=image).images[0]
+                    image = self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, start_step=start_step, latents=image).images[0]
                 elif i == 0:
                     image = self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", end_step=end_step)
                 elif i < len(text) - 1:
-                    image = self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type= "latent", end_step=end_step, start_step=start_step, latents=image)
-            # image =  self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
+                    image = self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", end_step=end_step, start_step=start_step, latents=image)
         else:
             for i in range(len(text)):
                 embed_prompt = embed_prompts[i]
                 start_step = timestep_table[i] if timestep_table is not None else None
-                print(len(text), i, start_step, timestep_table)
                 if i < len(text) - 1:
-                    end_step = timestep_table[i+1] if timestep_table is not None else None
+                    end_step = timestep_table[i + 1] if timestep_table is not None else None
                 else:
                     end_step = None
+
                 if i == len(text) - 1:
                     image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, start_step=start_step, latents=image).images[0]
                 elif i == 0:
                     image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", end_step=end_step)
                 elif i < len(text) - 1:
-                    image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type= "latent", end_step=end_step,start_step=start_step, latents=image)
-                
-            # image = self.tti(prompt="horse", generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, end_step=8, output_type="latent")
-            # image = self.tti(prompt="cow", generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, start_step=8, latents=image).images[0]
+                    image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", end_step=end_step, start_step=start_step, latents=image)
 
+        print(f"_predict: generated image={image}")
         return image
 
     def img_to_img_predict(self, text, image, seed=None, iterations=25, height=512, width=512, guidance_scale=7.0, strength=0.75):
@@ -373,6 +403,7 @@ class PromptParser():
         self.textual_embedding_path = args.config["textual_embedding_path"]
 
     def parse_prompt(self, pipeline, prompt):
+        print(f"parse_prompt: initial prompt={prompt}")
 
         # Replace %2F with / in prompt from HTTP TODO: Find a better way to handle this
         prompt = re.sub("%2F", "/", prompt)
@@ -399,7 +430,10 @@ class PromptParser():
             new_prompt, timestep_table = self.parse_prompt_travel(new_prompt)
             return new_prompt, timestep_table
         
-        return new_prompt
+        new_prompt, weights = self.parse_weighted_prompt(pipeline, new_prompt)
+        print(f"parse_prompt: new_prompt={new_prompt}")
+        print(f"Weights: {weights}")
+        return new_prompt, weights
     
     def parse_prompt_travel(self, prompt):
         prompt_list = []
@@ -427,9 +461,6 @@ class PromptParser():
             timestep_table.append(int(timestep.split(":")[0]))
             prompt_list.append(prompt_start + phrase + prompt_end)
         print(prompt_list, timestep_table)
-        
-       
-
         return prompt_list, timestep_table
     
     def parse_ti(self, pipeline, prompt):
@@ -508,3 +539,14 @@ class PromptParser():
         pipeline.unload_lora_weights()
 
         return new_prompt
+    
+    def parse_weighted_prompt(self, pipeline, prompt):
+        weights = self.extract_weights(prompt)
+        cleaned_prompt = re.sub(r"\+\+|--", "", prompt)
+        return cleaned_prompt, weights
+
+    def extract_weights(self, prompt):
+        # Finds patterns like "word++" or "word--" and assigns weight modifications
+        matches = re.findall(r"(\w+)(\+\+|--)", prompt)
+        weights = {match[0]: 1.1 ** match[1].count('+') if '+' in match[1] else 0.9 ** match[1].count('-') for match in matches}
+        return weights
