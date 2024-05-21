@@ -6,6 +6,7 @@ from PIL import Image
 from io import BytesIO
 import torch
 from diffusers import DiffusionPipeline, StableDiffusionControlNetPipeline, StableDiffusionXLControlNetPipeline, StableDiffusionXLPipeline,AutoPipelineForText2Image,AutoPipelineForImage2Image, StableDiffusionPipeline, StableDiffusionImg2ImgPipeline, DPMSolverMultistepScheduler, PNDMScheduler, StableDiffusionInpaintPipeline, ControlNetModel
+from .pipelines import StableDiffusionPTPipeline, retrieve_timesteps, StableDiffusionXLPTPipeline, StableDiffusionImg2ImgPTPipeline, StableDiffusionXLImg2ImgPTPipeline
 import threading
 import time
 import psutil
@@ -48,6 +49,7 @@ async def startup_event():
         print("Successfully started up")
         sd_plugin.notify_main_system_of_startup("True")
     except Exception as e:
+        # raise e
         sd_plugin.notify_main_system_of_startup("False")
 
 @app.get("/set_model/")
@@ -79,13 +81,15 @@ def execute(json_data: dict, seed: int = None, iterations: int = 20, height: int
 
     return {"status": "Success", "output_img": image_id}
 
-@app.get("/execute2/{text}/{img}")
-def execute2(text: str, img: str, seed = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, strength: float = 0.75):
+@app.put("/execute2/")
+def execute2(json_data: dict, seed = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, strength: float = 0.75):
     # check_model()
-
+    text = json_data["prompt"]
+    img = json_data["img"]
     imagebytes = fetch_image(img)
     image = Image.open(BytesIO(imagebytes))
     image = image.convert("RGB")
+    print(type(image))
     im = sd_plugin.img_to_img_predict(text, image, seed=seed, iterations=iterations, height=height, width=width, guidance_scale=guidance_scale, strength=strength)
     output = BytesIO()
     im.save(output, format="PNG")
@@ -192,6 +196,7 @@ class SD(Plugin):
         """
         model_path = self.config["model_name"]
         dtype = self.config["model_dtype"]
+        print(dtype)
         if os.path.exists(model_path):
             if "xl" in model_path.lower():
                 self.type = "xl"
@@ -206,15 +211,17 @@ class SD(Plugin):
         else:
             if "xl" in model_path.lower():
                 self.type = "xl"
-                # self.tti = StableDiffusionXLPipeline.from_pretrained(model_path,
-                #                                                      torch_dtype=torch.float32 if dtype == "fp32" else torch.float16,
-                #                                                      variant=dtype)
+                self.tti = StableDiffusionXLPTPipeline.from_pretrained(model_path,
+                                                                     torch_dtype=torch.float32 if dtype == "fp32" else torch.float16,
+                                                                     variant=dtype)
             else:
                 self.type = "sd"
-                # self.tti = StableDiffusionPipeline.from_pretrained(model_path,
-                #                                                    torch_dtype=torch.float32 if dtype == "fp32" else torch.float16,
-                #                                                    variant=dtype)
-            self.tti = AutoPipelineForText2Image.from_pretrained(model_path, torch_dtype=torch.float32 if dtype == "fp32" else torch.float16, variant=dtype)
+                self.tti = StableDiffusionPTPipeline.from_pretrained(model_path,
+                                                                   torch_dtype=torch.float16,
+                                                                   variant=dtype)
+            # self.tti = AutoPipelineForText2Image.from_pretrained(model_path, torch_dtype=torch.float32 if dtype == "fp32" else torch.float16, variant=dtype)
+        print(self.tti._execution_device, type(self.tti), dtype)
+        # self.tti.scheduler = PNDMScheduler.from_config(self.tti.scheduler.config)
         if self.config["scheduler"] == "pndm":
             pass
         elif self.config["scheduler"] == "dpm":
@@ -222,24 +229,31 @@ class SD(Plugin):
         else:
             print("Warning: Unknown scheduler. Using PNDM")
 
-        self.iti = AutoPipelineForImage2Image.from_pipe(self.tti)
-        controlnetpath = self.config["controlnet"]
-        if controlnetpath is not None:
-            controlnetmodel = ControlNetModel.from_pretrained(controlnetpath, torch_dtype=torch.float32 if dtype == "fp32" else torch.float16)
-            self.controlpipe = AutoPipelineForText2Image.from_pipe(self.tti, controlnet=controlnetmodel)
-            if sys.platform == "darwin":
-                self.controlpipe.to("mps")
-            else:
-                self.controlpipe.enable_model_cpu_offload()
-        else:
-            self.controlpipe = None
+        if self.type == "xl":
+            self.iti = StableDiffusionXLImg2ImgPTPipeline(**self.tti.components)
+        else: 
+            self.iti = StableDiffusionImg2ImgPTPipeline(**self.tti.components)
+        # controlnetpath = self.config["controlnet"]
+        # if controlnetpath is not None:
+        #     controlnetmodel = ControlNetModel.from_pretrained(controlnetpath, torch_dtype=torch.float32 if dtype == "fp32" else torch.float16)
+        #     self.controlpipe = AutoPipelineForText2Image.from_pipe(self.tti, controlnet=controlnetmodel)
+        #     if sys.platform == "darwin":
+        #         self.controlpipe.to("mps")
+        #     else:
+        #         self.controlpipe.enable_model_cpu_offload()
+        # else:
+        #     self.controlpipe = None
 
         # self.lora()
         # self.load_textual_inversion()
         self.tti.to("cpu", torch.float32 if dtype == "fp32" else torch.float16)
+        self.iti.to("cpu", torch.float32 if dtype == "fp32" else torch.float16)
+
         if sys.platform == "darwin":
             self.tti.to("mps", torch.float32 if dtype == "fp32" else torch.float16)
             self.tti.enable_attention_slicing()
+            self.iti.to("mps", torch.float32 if dtype == "fp32" else torch.float16)
+            self.iti.enable_attention_slicing()
         elif torch.cuda.is_available():
             self.tti.to("cuda", torch.float32 if dtype == "fp32" else torch.float16)
             self.iti.to("cuda", torch.float32 if dtype == "fp32" else torch.float16)
@@ -248,6 +262,8 @@ class SD(Plugin):
         return self.pp.parse_prompt(pipeline, prompt)
 
     def prep_inputs(self, seed, text):
+        print(text)
+        print(type(text))
         if self.type == "xl":
             compel_proc = Compel(
                 tokenizer=[self.tti.tokenizer, self.tti.tokenizer_2] ,
@@ -295,6 +311,9 @@ class SD(Plugin):
         # timestep_table = [0, 8]
 
         image = None
+        timesteps, num_inference_steps = retrieve_timesteps(self.tti.scheduler, iterations, self.tti._execution_device, None)
+        timesteps = timesteps.cpu()
+
         if self.type == "xl":
             # conditioning, pooled = embed_prompt
             # print("XL inference")
@@ -307,13 +326,16 @@ class SD(Plugin):
                     end_step = timestep_table[i+1] if timestep_table is not None else None
                 else:
                     end_step = None
+
                 if i == len(text) - 1:
-                    image =  self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, start_step=start_step, latents=image).images[0]
+                    if image is not None:
+                        image = image[None, :, :, :]
+                    image =  self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, timesteps=timesteps[start_step:iterations], latents=image).images[0]
                 elif i == 0:
-                    image = self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", end_step=end_step)
+                    image = self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", timesteps=timesteps[:end_step]).images[0]
                 elif i < len(text) - 1:
-                    image = self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type= "latent", end_step=end_step, start_step=start_step, latents=image)
-            # image =  self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale).images[0]
+                    image = image[None, :, :, :]
+                    image = self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type= "latent", timesteps=timesteps[start_step:end_step], latents=image).images[0]
         else:
             for i in range(len(text)):
                 embed_prompt = embed_prompts[i]
@@ -324,24 +346,65 @@ class SD(Plugin):
                 else:
                     end_step = None
                 if i == len(text) - 1:
-                    image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, start_step=start_step, latents=image).images[0]
+                    if image is not None:
+                        image = image[None, :, :, :]
+                    image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, timesteps=timesteps[start_step:iterations], latents=image).images[0]
                 elif i == 0:
-                    image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", end_step=end_step)
+                    image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", timesteps=timesteps[:end_step]).images[0]
                 elif i < len(text) - 1:
-                    image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type= "latent", end_step=end_step,start_step=start_step, latents=image)
+                    image = image[None, :, :, :]
+                    image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type= "latent", timesteps=timesteps[start_step:end_step], latents=image).images[0]
                 
-            # image = self.tti(prompt="horse", generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, end_step=8, output_type="latent")
-            # image = self.tti(prompt="cow", generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, start_step=8, latents=image).images[0]
-
         return image
 
     def img_to_img_predict(self, text, image, seed=None, iterations=25, height=512, width=512, guidance_scale=7.0, strength=0.75):
-        embed_prompt, generator = self.prep_inputs(seed, text)
+        text = self.parse_prompt(self.tti, text)
+        if isinstance(text, tuple):
+            text, timestep_table = text
+        elif isinstance(text, str):
+            text = [text]
+            timestep_table = None
+        embed_prompts = []
+
+        if self.type == "xl":
+            pooled_prompts = []
+            for prompt in text:
+                encoded, generator = self.prep_inputs(seed, prompt)
+                embed_prompt, pooled_prompt = encoded
+                embed_prompts.append(embed_prompt)
+                pooled_prompts.append(pooled_prompt)
+        else:
+
+            for prompt in text:
+                embed_prompt, generator = self.prep_inputs(seed, prompt) 
+                embed_prompts.append(embed_prompt)
+
+        output_img = None
+        timesteps, num_inference_steps = retrieve_timesteps(self.tti.scheduler, iterations, self.tti._execution_device, None)
+        timesteps = timesteps.cpu()
+
         if self.type == "xl":
             conditioning, pooled = embed_prompt
             output_img = self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image=image, generator=generator, num_inference_steps=iterations, guidance_scale=guidance_scale).images[0]
         else:
-            output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, guidance_scale=guidance_scale,strength=strength).images[0]
+            for i in range(len(text)):
+                embed_prompt = embed_prompts[i]
+                start_step = timestep_table[i] if timestep_table is not None else None
+                print(len(text), i, start_step, timestep_table)
+                if i < len(text) - 1:
+                    end_step = timestep_table[i+1] if timestep_table is not None else None
+                else:
+                    end_step = None
+                if i == len(text) - 1:
+                    if output_img is not None:
+                        output_img = output_img[None, :, :, :]
+                    output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, timesteps=timesteps[start_step:iterations], latents=output_img).images[0]
+                elif i == 0:
+                    output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", timesteps=timesteps[:end_step]).images[0]
+                elif i < len(text) - 1:
+                    output_img = output_img[None, :, :, :]
+                    output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type= "latent", timesteps=timesteps[start_step:end_step], latents=output_img).images[0]
+            # output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, guidance_scale=guidance_scale,strength=strength).images[0]
         output_img = output_img.resize((height, width))
         return output_img
 
@@ -375,8 +438,11 @@ class PromptParser():
     def parse_prompt(self, pipeline, prompt):
 
         # Replace %2F with / in prompt from HTTP TODO: Find a better way to handle this
-        prompt = re.sub("%2F", "/", prompt)
         new_prompt = prompt
+
+        # TODO Possible error?
+        # if re.search("<", prompt) and not re.search("<lora:", prompt) and not re.search("<ti:", prompt):
+            
 
         print("Parsing for loras")
         split = re.split("<lora:", prompt, 1)
@@ -439,8 +505,7 @@ class PromptParser():
             ti_name, token = ti_info.split(":")
             if self.type == "xl":
                 if "/" in ti_name:
-                    author, repo, weight_name = ti_name.split("/")
-                    hf_repo = "/".join([author, repo])
+                    hf_repo, weight_name = self.hf_split(ti_name)
                     state_dict = load_file(os.path.join(hf_repo, weight_name))
                 else:
                     state_dict = load_file(os.path.join(self.textual_embedding_path, ti_name))
@@ -451,8 +516,7 @@ class PromptParser():
                 prompt = prompt_start + token0 + token1 + prompt_end
             else:
                 if "/" in ti_name:
-                    author, repo, weight_name = ti_name.split("/")
-                    hf_repo = "/".join([author, repo])
+                    hf_repo, weight_name = self.hf_split(ti_name)
                     pipeline.load_textual_inversion(hf_repo, weight_name=weight_name, token=f"<{token}>")
                 else:
                     pipeline.load_textual_inversion(self.textual_embedding_path, weight_name=ti_name, token=f"<{token}>")
@@ -490,12 +554,25 @@ class PromptParser():
         # Load the lora weights based on the lora_dict information and prepare adapter info
         for lora_name, lora_weight in lora_dict.items():
             if "/" in lora_name:
-                author, repo, weight_name = lora_name.split("/")
-                hf_repo = "/".join([author, repo])
-                pipeline.load_lora_weights(hf_repo, weight_name=weight_name, adapter_name=str(adapter_name))
+                hf_repo, weight_name = self.hf_split(lora_name)
+                # try:
+                #     pipeline.load_lora_weights(hf_repo, weight_name=weight_name, adapter_name=str(adapter_name))
+                # except Exception as e:
+                #     if isinstance(e, ValueError):
+                #         raise HTTPException(status_code=400, detail="LoRA weights are incompatible with loaded model")
+                #     elif isinstance(e, OSError):
+                #         raise HTTPException(status_code=400, detail="LoRA weights not found in Hugging Face model hub")
+                self.check_lora_weights(pipeline, hf_repo, weight_name=weight_name, adapter_name=str(adapter_name), hf_repo=True)
                 # pipeline.load_lora_weights(hf_repo, weight_name=weight_name)
             else:
-                pipeline.load_lora_weights(self.loras_path, weight_name=lora_name,  adapter_name=str(adapter_name))
+                self.check_lora_weights(pipeline, self.loras_path, weight_name=lora_name, adapter_name=str(adapter_name))
+                # try:
+                #     pipeline.load_lora_weights(self.loras_path, weight_name=lora_name,  adapter_name=str(adapter_name))
+                # except Exception as e:
+                #     if isinstance(e, ValueError):
+                #         raise HTTPException(status_code=400, detail="LoRA weights are incompatible with loaded model")
+                #     elif isinstance(e, OSError):
+                #         raise HTTPException(status_code=400, detail="LoRA file not found in the specified path")
             adapter_name_list.append(str(adapter_name))
             adapter_weight_list.append(lora_weight)
             adapter_name += 1
@@ -508,3 +585,23 @@ class PromptParser():
         pipeline.unload_lora_weights()
 
         return new_prompt
+    
+    def hf_split(self, hf_path):
+        try:
+            author, repo, weight_name = hf_path.split("/")
+        except:
+            raise HTTPException(status_code=400, detail="Please make sure weights are selected from Hugging Face model hub in the format 'author/repo/weight_name'")
+        hf_repo = "/".join([author, repo])
+        return hf_repo, weight_name
+
+    def check_lora_weights(self, pipeline, path, weight_name, adapter_name=None, hf_repo=False):
+        try:
+            pipeline.load_lora_weights(path, weight_name=weight_name, adapter_name=adapter_name)
+        except Exception as e:
+            if isinstance(e, ValueError):
+                raise HTTPException(status_code=400, detail="LoRA weights are incompatible with loaded model")
+            elif isinstance(e, OSError):
+                if hf_repo:
+                    raise HTTPException(status_code=400, detail="LoRA weights not found in Hugging Face model hub")
+                else:
+                    raise HTTPException(status_code=400, detail="LoRA file not found in the specified path")
