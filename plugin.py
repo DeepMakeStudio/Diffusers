@@ -257,11 +257,15 @@ class SD(Plugin):
     
     def apply_weights(self, embeddings, tokenizer, weights, text):
         input_ids = tokenizer(text, return_tensors='pt').input_ids[0]
+        tokens = tokenizer.convert_ids_to_tokens(input_ids)
         original_embeddings = embeddings.clone()
+
         print(f"Original Embeddings:\n {original_embeddings}")
+        print(f"Tokenized Text: {tokens}")
+        print(f"Input IDs: {input_ids}")
 
         for word, weight in weights.items():
-            token_ids = self.find_word_indices(word, tokenizer, input_ids)
+            token_ids = self.find_word_indices(word, tokens)
             print(f"Word: {word}, Weight: {weight}, Token IDs: {token_ids}")
             for index in token_ids:
                 if index < embeddings.size(1):
@@ -280,12 +284,12 @@ class SD(Plugin):
         print(f"Comparison Result: {comparison_result}")
 
         return embeddings
-
-    def find_word_indices(self, word, tokenizer, input_ids):
+    
+    def find_word_indices(self, word, tokens):
         word_indices = []
-        tokens = tokenizer.convert_ids_to_tokens(input_ids)
+        subword_tokens = word.lower().split()
         for idx, token in enumerate(tokens):
-            if word in token:
+            if any(subword in token.lower() for subword in subword_tokens):
                 word_indices.append(idx)
         return word_indices
 
@@ -542,6 +546,18 @@ class PromptParser():
     
     def parse_weighted_prompt(self, pipeline, prompt):
         weights = self.extract_weights(prompt)
+        cleaned_prompt = re.sub(r"\(\w+:(?:\d*\.)?\d+\)", "", prompt)
+        return cleaned_prompt, weights
+
+    def extract_weights(self, prompt):
+        matches = re.findall(r"\((\w+):((?:\d*\.)?\d+)\)", prompt)
+        weights = {match[0]: float(match[1]) for match in matches}
+        return weights
+    
+
+    """
+    def parse_weighted_prompt(self, pipeline, prompt):
+        weights = self.extract_weights(prompt)
         cleaned_prompt = re.sub(r"\+\+|--", "", prompt)
         return cleaned_prompt, weights
 
@@ -550,3 +566,4 @@ class PromptParser():
         matches = re.findall(r"(\w+)(\+\+|--)", prompt)
         weights = {match[0]: 1.1 ** match[1].count('+') if '+' in match[1] else 0.9 ** match[1].count('-') for match in matches}
         return weights
+    """
