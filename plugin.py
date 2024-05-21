@@ -380,12 +380,34 @@ class SD(Plugin):
                 embed_prompts.append(embed_prompt)
 
         output_img = None
-        timesteps, num_inference_steps = retrieve_timesteps(self.tti.scheduler, iterations, self.tti._execution_device, None)
+        timesteps, num_inference_steps = retrieve_timesteps(self.iti.scheduler, iterations, self.iti._execution_device, None)
+        timesteps, num_inference_steps = self.iti.get_timesteps(num_inference_steps, strength, self.iti._execution_device)
         timesteps = timesteps.cpu()
 
+
         if self.type == "xl":
-            conditioning, pooled = embed_prompt
-            output_img = self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image=image, generator=generator, num_inference_steps=iterations, guidance_scale=guidance_scale).images[0]
+            for i in range(len(text)):
+                conditioning = embed_prompts[i]
+                pooled = pooled_prompts[i]
+                start_step = timestep_table[i] if timestep_table is not None else None
+
+                if i < len(text) - 1:
+                    end_step = timestep_table[i+1] if timestep_table is not None else None
+                else:
+                    end_step = None
+
+                if i == len(text) - 1:
+                    if output_img is not None:
+                        output_img = output_img[None, :, :, :]
+                    output_img =  self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image = image,generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, timesteps=timesteps[start_step:num_inference_steps], latents=output_img).images[0]
+                elif i == 0:
+                    output_img = self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image=image,generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", timesteps=timesteps[:end_step]).images[0]
+                elif i < len(text) - 1:
+                    output_img = output_img[None, :, :, :]
+                    output_img = self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image=image,generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type= "latent", timesteps=timesteps[start_step:end_step], latents=output_img).images[0]
+        
+            # conditioning, pooled = embed_prompt
+            # output_img = self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image=image, generator=generator, num_inference_steps=iterations, guidance_scale=guidance_scale).images[0]
         else:
             for i in range(len(text)):
                 embed_prompt = embed_prompts[i]
@@ -398,7 +420,7 @@ class SD(Plugin):
                 if i == len(text) - 1:
                     if output_img is not None:
                         output_img = output_img[None, :, :, :]
-                    output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, timesteps=timesteps[start_step:iterations], latents=output_img).images[0]
+                    output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, timesteps=timesteps[start_step:num_inference_steps], latents=output_img).images[0]
                 elif i == 0:
                     output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", timesteps=timesteps[:end_step]).images[0]
                 elif i < len(text) - 1:
