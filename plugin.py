@@ -65,11 +65,11 @@ def set_model():
     return {"status": "Success", "detail": f"Model set successfully to {model_name}"}
 
 @app.put("/execute/")
-def execute(json_data: dict, seed: int = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, control_image: str = None):
+def execute(json_data: dict, seed: int = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, control_image: str = None, negative_prompt: str = None):
     # check_model()
     prompt = json_data["prompt"]
     if control_image is None:
-        im = sd_plugin._predict(prompt, seed=seed, iterations=iterations, height=height, width=width, guidance_scale=guidance_scale)
+        im = sd_plugin._predict(prompt, seed=seed, iterations=iterations, height=height, width=width, guidance_scale=guidance_scale, negative_prompt=negative_prompt)
     else:
         imagebytes = fetch_image(control_image)
         control_image = Image.open(BytesIO(imagebytes))
@@ -82,15 +82,14 @@ def execute(json_data: dict, seed: int = None, iterations: int = 20, height: int
     return {"status": "Success", "output_img": image_id}
 
 @app.put("/execute2/")
-def execute2(json_data: dict, seed = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, strength: float = 0.75):
+def execute2(json_data: dict, seed = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, strength: float = 0.75, negative_prompt=None):
     # check_model()
     text = json_data["prompt"]
     img = json_data["img"]
     imagebytes = fetch_image(img)
     image = Image.open(BytesIO(imagebytes))
     image = image.convert("RGB")
-    print(type(image))
-    im = sd_plugin.img_to_img_predict(text, image, seed=seed, iterations=iterations, height=height, width=width, guidance_scale=guidance_scale, strength=strength)
+    im = sd_plugin.img_to_img_predict(text, image, seed=seed, iterations=iterations, height=height, width=width, guidance_scale=guidance_scale, strength=strength, negative_prompt=negative_prompt)
     output = BytesIO()
     im.save(output, format="PNG")
     image_id = store_image(output.getvalue())
@@ -279,7 +278,7 @@ class SD(Plugin):
             generator = torch.manual_seed(seed)
         return embed_prompt, generator
 
-    def _predict(self, text, seed = None, iterations=20, height=512, width=512, guidance_scale=7.0) -> None:
+    def _predict(self, text, seed = None, iterations=20, height=512, width=512, guidance_scale=7.0, negative_prompt=None) -> None:
         """ Predict from the loaded frames.
 
         With a threading lock (to prevent stacking), run the selected faces through the Faceswap
@@ -302,7 +301,6 @@ class SD(Plugin):
                 embed_prompts.append(embed_prompt)
                 pooled_prompts.append(pooled_prompt)
         else:
-
             for prompt in text:
                 embed_prompt, generator = self.prep_inputs(seed, prompt) 
                 embed_prompts.append(embed_prompt)
@@ -330,12 +328,12 @@ class SD(Plugin):
                 if i == len(text) - 1:
                     if image is not None:
                         image = image[None, :, :, :]
-                    image =  self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, timesteps=timesteps[start_step:iterations], latents=image).images[0]
+                    image =  self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, timesteps=timesteps[start_step:iterations], latents=image, negative_prompt=negative_prompt).images[0]
                 elif i == 0:
-                    image = self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", timesteps=timesteps[:end_step]).images[0]
+                    image = self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", timesteps=timesteps[:end_step], negative_prompt=negative_prompt).images[0]
                 elif i < len(text) - 1:
                     image = image[None, :, :, :]
-                    image = self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type= "latent", timesteps=timesteps[start_step:end_step], latents=image).images[0]
+                    image = self.tti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type= "latent", timesteps=timesteps[start_step:end_step], latents=image, negative_prompt=negative_prompt).images[0]
         else:
             for i in range(len(text)):
                 embed_prompt = embed_prompts[i]
@@ -348,16 +346,16 @@ class SD(Plugin):
                 if i == len(text) - 1:
                     if image is not None:
                         image = image[None, :, :, :]
-                    image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, timesteps=timesteps[start_step:iterations], latents=image).images[0]
+                    image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, timesteps=timesteps[start_step:iterations], latents=image, negative_prompt=negative_prompt).images[0]
                 elif i == 0:
-                    image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", timesteps=timesteps[:end_step]).images[0]
+                    image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", timesteps=timesteps[:end_step], negative_prompt=negative_prompt).images[0]
                 elif i < len(text) - 1:
                     image = image[None, :, :, :]
-                    image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type= "latent", timesteps=timesteps[start_step:end_step], latents=image).images[0]
+                    image = self.tti(prompt_embeds=embed_prompt, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type= "latent", timesteps=timesteps[start_step:end_step], latents=image, negative_prompt=negative_prompt).images[0]
                 
         return image
 
-    def img_to_img_predict(self, text, image, seed=None, iterations=25, height=512, width=512, guidance_scale=7.0, strength=0.75):
+    def img_to_img_predict(self, text, image, seed=None, iterations=25, height=512, width=512, guidance_scale=7.0, strength=0.75, negative_prompt=None):
         text = self.parse_prompt(self.tti, text)
         if isinstance(text, tuple):
             text, timestep_table = text
@@ -381,30 +379,35 @@ class SD(Plugin):
 
         output_img = None
         timesteps, num_inference_steps = retrieve_timesteps(self.iti.scheduler, iterations, self.iti._execution_device, None)
+        print(timesteps, len(timesteps), num_inference_steps)
         timesteps, num_inference_steps = self.iti.get_timesteps(num_inference_steps, strength, self.iti._execution_device)
         timesteps = timesteps.cpu()
+        print(timesteps, len(timesteps), num_inference_steps)
 
 
         if self.type == "xl":
             for i in range(len(text)):
                 conditioning = embed_prompts[i]
                 pooled = pooled_prompts[i]
-                start_step = timestep_table[i] if timestep_table is not None else None
+                start_step = timestep_table[i] if timestep_table is not None else 0
+                print(len(timesteps))
 
                 if i < len(text) - 1:
                     end_step = timestep_table[i+1] if timestep_table is not None else None
                 else:
                     end_step = None
 
+                print(len(text), i, start_step, timestep_table)
+
                 if i == len(text) - 1:
                     if output_img is not None:
                         output_img = output_img[None, :, :, :]
-                    output_img =  self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image = image,generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, timesteps=timesteps[start_step:num_inference_steps], latents=output_img).images[0]
+                    output_img =  self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image = image,generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, timesteps=timesteps[start_step:num_inference_steps], latents=output_img, negative_prompt=negative_prompt).images[0]
                 elif i == 0:
-                    output_img = self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image=image,generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", timesteps=timesteps[:end_step]).images[0]
+                    output_img = self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image=image,generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", timesteps=timesteps[:end_step], negative_prompt=negative_prompt).images[0]
                 elif i < len(text) - 1:
                     output_img = output_img[None, :, :, :]
-                    output_img = self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image=image,generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type= "latent", timesteps=timesteps[start_step:end_step], latents=output_img).images[0]
+                    output_img = self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image=image,generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type= "latent", timesteps=timesteps[start_step:end_step], latents=output_img, negative_prompt=negative_prompt).images[0]
         
             # conditioning, pooled = embed_prompt
             # output_img = self.iti(prompt_embeds=conditioning, pooled_prompt_embeds=pooled, image=image, generator=generator, num_inference_steps=iterations, guidance_scale=guidance_scale).images[0]
@@ -420,12 +423,12 @@ class SD(Plugin):
                 if i == len(text) - 1:
                     if output_img is not None:
                         output_img = output_img[None, :, :, :]
-                    output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, timesteps=timesteps[start_step:num_inference_steps], latents=output_img).images[0]
+                    output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, timesteps=timesteps[start_step:num_inference_steps], latents=output_img, negative_prompt=negative_prompt).images[0]
                 elif i == 0:
-                    output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", timesteps=timesteps[:end_step]).images[0]
+                    output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type="latent", timesteps=timesteps[:end_step], negative_prompt=negative_prompt).images[0]
                 elif i < len(text) - 1:
                     output_img = output_img[None, :, :, :]
-                    output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type= "latent", timesteps=timesteps[start_step:end_step], latents=output_img).images[0]
+                    output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, height=height, width=width, guidance_scale=guidance_scale, output_type= "latent", timesteps=timesteps[start_step:end_step], latents=output_img, negative_prompt=negative_prompt).images[0]
             # output_img = self.iti(prompt_embeds=embed_prompt, image=image, generator=generator, num_inference_steps=iterations, guidance_scale=guidance_scale,strength=strength).images[0]
         output_img = output_img.resize((height, width))
         return output_img
@@ -539,10 +542,10 @@ class PromptParser():
             else:
                 if "/" in ti_name:
                     hf_repo, weight_name = self.hf_split(ti_name)
-                    pipeline.load_textual_inversion(hf_repo, weight_name=weight_name, token=f"<{token}>")
+                    pipeline.load_textual_inversion(hf_repo, weight_name=weight_name, token=token)
                 else:
-                    pipeline.load_textual_inversion(self.textual_embedding_path, weight_name=ti_name, token=f"<{token}>")
-                prompt = prompt_start + f"<{token}>" + prompt_end
+                    pipeline.load_textual_inversion(self.textual_embedding_path, weight_name=ti_name, token=token)
+                prompt = prompt_start + token + prompt_end
     
     def parse_loras(self, pipeline, prompt):
         # Parsing for multiple loras

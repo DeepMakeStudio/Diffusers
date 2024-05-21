@@ -1219,13 +1219,15 @@ class StableDiffusionXLImg2ImgPTPipeline(
             return isinstance(dnv, float) and 0 < dnv < 1
 
         timesteps, num_inference_steps = retrieve_timesteps(self.scheduler, num_inference_steps, device, timesteps)
-        timesteps, num_inference_steps = self.get_timesteps(
-            num_inference_steps,
-            strength,
-            device,
-            denoising_start=self.denoising_start if denoising_value_valid(self.denoising_start) else None,
-        )
-        latent_timestep = timesteps[:1].repeat(batch_size * num_images_per_prompt)
+        # timesteps, num_inference_steps = self.get_timesteps(
+        #     num_inference_steps,
+        #     strength,
+        #     device,
+        #     denoising_start=self.denoising_start if denoising_value_valid(self.denoising_start) else None,
+        # )
+        latent_timestep = None
+        if latents is None:
+            latent_timestep = timesteps[:1].repeat(batch_size * num_images_per_prompt)
 
         add_noise = True if self.denoising_start is None else False
         # 6. Prepare latent variables
