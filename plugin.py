@@ -256,72 +256,67 @@ class SD(Plugin):
         elif torch.cuda.is_available():
             self.tti.to("cuda", torch.float32 if dtype == "fp32" else torch.float16)
             self.iti.to("cuda", torch.float32 if dtype == "fp32" else torch.float16)
-    
-    def parse_prompt(self, pipeline, prompt):
-        return self.pp.parse_prompt(pipeline, prompt)
 
-    def prep_inputs(self, seed, text):
-        print(text)
-        print(type(text))
-        if self.type == "xl":
-            compel_proc = Compel(
-                tokenizer=[self.tti.tokenizer, self.tti.tokenizer_2] ,
-                text_encoder=[self.tti.text_encoder, self.tti.text_encoder_2],
-                returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
-                requires_pooled=[False, True]
-                )
-        else:
-            compel_proc = Compel(tokenizer=self.tti.tokenizer, text_encoder=self.tti.text_encoder)
+    def prep_inputs(self, seed, text, compel_proc):
         embed_prompt = compel_proc(text)
+
         generator = None
         if seed is not None:
             generator = torch.manual_seed(seed)
+
         return embed_prompt, generator
+    
+    def apply_weights(self, embeddings, tokenizer, weights, text):
+        input_ids = tokenizer(text, return_tensors='pt').input_ids[0]
+        tokens = tokenizer.convert_ids_to_tokens(input_ids)
+        original_embeddings = embeddings.clone()
 
-    def _predict(self, text, seed = None, iterations=20, height=512, width=512, guidance_scale=7.0, negative_prompt=None) -> None:
-        """ Predict from the loaded frames.
+    def _predict(self, text, seed=None, iterations=20, height=512, width=512, guidance_scale=7.0, negative_prompt=None) -> None:
 
-        With a threading lock (to prevent stacking), run the selected faces through the Faceswap
-        model predict function and add the output to :attr:`predicted`
-        """
-        text = self.parse_prompt(self.tti, text)
-        if isinstance(text, tuple):
-            text, timestep_table = text
-        elif isinstance(text, str):
-            text = [text]
+        parsed_result = self.pp.parse_prompt(self.tti, text)
+        if isinstance(parsed_result, tuple):
+            text, timestep_table = parsed_result
+        else:
+            text = [parsed_result]
             timestep_table = None
-        # timestep_table = None
+
+        print(f"parse_prompt: new_prompt={text}")
+
         embed_prompts = []
 
         if self.type == "xl":
+            compel_proc = Compel(
+                tokenizer=[self.tti.tokenizer, self.tti.tokenizer_2],
+                text_encoder=[self.tti.text_encoder, self.tti.text_encoder_2],
+                returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
+                requires_pooled=[False, True]
+            )
             pooled_prompts = []
             for prompt in text:
-                encoded, generator = self.prep_inputs(seed, prompt)
+                encoded, generator = self.prep_inputs(seed, prompt, compel_proc)
                 embed_prompt, pooled_prompt = encoded
                 embed_prompts.append(embed_prompt)
                 pooled_prompts.append(pooled_prompt)
         else:
+            compel_proc = Compel(tokenizer=self.tti.tokenizer, text_encoder=self.tti.text_encoder)
             for prompt in text:
-                embed_prompt, generator = self.prep_inputs(seed, prompt) 
+                embed_prompt, generator = self.prep_inputs(seed, prompt, compel_proc)
                 embed_prompts.append(embed_prompt)
-        # print(len(text), embed_prompt.shape)
-        # text = ["cow", "horse"]
-        # timestep_table = [0, 8]
+
+        print(f"_predict: embed_prompts={embed_prompts}")
 
         image = None
         timesteps, num_inference_steps = retrieve_timesteps(self.tti.scheduler, iterations, self.tti._execution_device, None)
         timesteps = timesteps.cpu()
 
         if self.type == "xl":
-            # conditioning, pooled = embed_prompt
-            # print("XL inference")
             for i in range(len(text)):
                 conditioning = embed_prompts[i]
                 pooled = pooled_prompts[i]
                 start_step = timestep_table[i] if timestep_table is not None else None
 
                 if i < len(text) - 1:
-                    end_step = timestep_table[i+1] if timestep_table is not None else None
+                    end_step = timestep_table[i + 1] if timestep_table is not None else None
                 else:
                     end_step = None
 
@@ -338,11 +333,11 @@ class SD(Plugin):
             for i in range(len(text)):
                 embed_prompt = embed_prompts[i]
                 start_step = timestep_table[i] if timestep_table is not None else None
-                print(len(text), i, start_step, timestep_table)
                 if i < len(text) - 1:
-                    end_step = timestep_table[i+1] if timestep_table is not None else None
+                    end_step = timestep_table[i + 1] if timestep_table is not None else None
                 else:
                     end_step = None
+
                 if i == len(text) - 1:
                     if image is not None:
                         image = image[None, :, :, :]
@@ -365,16 +360,23 @@ class SD(Plugin):
         embed_prompts = []
 
         if self.type == "xl":
+            compel_proc = Compel(
+                tokenizer=[self.tti.tokenizer, self.tti.tokenizer_2],
+                text_encoder=[self.tti.text_encoder, self.tti.text_encoder_2],
+                returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
+                requires_pooled=[False, True]
+            )
             pooled_prompts = []
             for prompt in text:
-                encoded, generator = self.prep_inputs(seed, prompt)
+                encoded, generator = self.prep_inputs(seed, prompt, compel_proc)
                 embed_prompt, pooled_prompt = encoded
                 embed_prompts.append(embed_prompt)
                 pooled_prompts.append(pooled_prompt)
         else:
+            compel_proc = Compel(tokenizer=self.tti.tokenizer, text_encoder=self.tti.text_encoder)
 
             for prompt in text:
-                embed_prompt, generator = self.prep_inputs(seed, prompt) 
+                embed_prompt, generator = self.prep_inputs(seed, prompt, compel_proc) 
                 embed_prompts.append(embed_prompt)
 
         output_img = None
@@ -461,6 +463,7 @@ class PromptParser():
         self.textual_embedding_path = args.config["textual_embedding_path"]
 
     def parse_prompt(self, pipeline, prompt):
+        print(f"parse_prompt: initial prompt={prompt}")
 
         # Replace %2F with / in prompt from HTTP TODO: Find a better way to handle this
         new_prompt = prompt
@@ -475,7 +478,7 @@ class PromptParser():
             if len(self.loras) == 1:
                 pipeline.unfuse_lora()
             elif len(self.loras) > 1:
-                self.set_model()
+                sd_plugin.set_model()
         else:
             new_prompt = self.parse_loras(pipeline, prompt)
         print("Parsing for textual inversion")
@@ -483,52 +486,77 @@ class PromptParser():
         split = re.split("<ti:", new_prompt, 1)
         if len(split) != 1:
             new_prompt = self.parse_ti(pipeline, new_prompt)
+        print(new_prompt)
+        new_prompt = self.parse_weighted_prompt(new_prompt)
+        print(f"parse_prompt: new_prompt={new_prompt}")
 
         print("Parsing for prompt travel")
         split = re.split("\[", new_prompt, 1)
+        timestep_table = None
         if len(split) != 1:
             new_prompt, timestep_table = self.parse_prompt_travel(new_prompt)
             return new_prompt, timestep_table
-        
         return new_prompt
     
     def parse_prompt_travel(self, prompt):
+        original_prompt = prompt
         prompt_list = []
         timestep_table = [0]
-        prompt_start, temp = re.split("\[", prompt, 1)
-        # [prompt1:prompt2:step:prompt3:step]
-        phrase1, phrase2, timestep = re.split(":", temp, 2)
-        timestep, prompt_end = re.split("\]", timestep, 1)
-        timestep_table.append(int(timestep.split(":")[0]))
-        prompt1 = prompt_start + phrase1 + prompt_end
-        prompt2 = prompt_start + phrase2 + prompt_end
-        prompt_list.append(prompt1)
-        prompt_list.append(prompt2)
-        temp = timestep
-        if re.search(":", temp):
-            timestep, temp = re.split(":", temp, 1)
-        print(temp)
-        while re.search(":", temp):
-            phrase, timestep = re.split(":", temp, 1)
-            print(phrase, timestep)
-            if re.search(":", timestep):
-                timestep, temp = re.split(":", timestep, 1)
-            else:
-                temp = ""
+        while re.search("\[", prompt):
+            prompt_start, temp = re.split("\[", prompt, 1)
+            phrase1, phrase2, timestep = re.split(":", temp, 2)
+            timestep, prompt_end = re.split("\]", timestep, 1)
             timestep_table.append(int(timestep.split(":")[0]))
-            prompt_list.append(prompt_start + phrase + prompt_end)
-        print(prompt_list, timestep_table)
+            prompt1 = prompt_start + phrase1 + prompt_end
+            prompt2 = prompt_start + phrase2 + prompt_end
+            prompt_list.append(prompt1)
+            prompt_list.append(prompt2)
+            temp = timestep
+            if re.search(":", temp):
+                timestep, temp = re.split(":", temp, 1)
+            while re.search(":", temp):
+                phrase, timestep = re.split(":", temp, 1)
+                if re.search(":", timestep):
+                    timestep, temp = re.split(":", timestep, 1)
+                else:
+                    temp = ""
+                timestep_table.append(int(timestep.split(":")[0]))
+                prompt_list.append(prompt_start + phrase + prompt_end)
+            prompt = prompt1
+            print(prompt_list, timestep_table)
         
-       
 
         return prompt_list, timestep_table
+
+    # def get_table(self, prompt):
+    #     prompt_start, temp = re.split("\[", prompt, 1)
+    #     phrase1, phrase2, timestep = re.split(":", temp, 2)
+    #     timestep, prompt_end = re.split("\]", timestep, 1)
+    #     timestep_table.append(int(timestep.split(":")[0]))
+    #     prompt1 = prompt_start + phrase1 + prompt_end
+    #     prompt2 = prompt_start + phrase2 + prompt_end
+    #     prompt_list.append(prompt1)
+    #     prompt_list.append(prompt2)
+    #     temp = timestep
+    #     if re.search(":", temp):
+    #         timestep, temp = re.split(":", temp, 1)
+    #     while re.search(":", temp):
+    #         phrase, timestep = re.split(":", temp, 1)
+    #         if re.search(":", timestep):
+    #             timestep, temp = re.split(":", timestep, 1)
+    #         else:
+    #             temp = ""
+    #         timestep_table.append(int(timestep.split(":")[0]))
+    #         prompt_list.append(prompt_start + phrase + prompt_end)
+    #     prompt = prompt1
+    #     print(prompt_list, timestep_table)
     
     def parse_ti(self, pipeline, prompt):
         while re.search("<ti:", prompt):
             prompt_start, temp = re.split("<ti:", prompt, 1)
             ti_info, prompt_end = re.split(">", temp, 1)
             ti_name, token = ti_info.split(":")
-            if self.type == "xl":
+            if sd_plugin.type == "xl":
                 if "/" in ti_name:
                     hf_repo, weight_name = self.hf_split(ti_name)
                     state_dict = load_file(os.path.join(hf_repo, weight_name))
@@ -546,6 +574,7 @@ class PromptParser():
                 else:
                     pipeline.load_textual_inversion(self.textual_embedding_path, weight_name=ti_name, token=token)
                 prompt = prompt_start + token + prompt_end
+        return prompt
     
     def parse_loras(self, pipeline, prompt):
         # Parsing for multiple loras
@@ -560,14 +589,20 @@ class PromptParser():
             new_prompt = prompt_start + prompt_end
 
         # If the lora structure is the same, return immediately
-        if lora_dict == self.loras:
+        same = True
+        for lora_name in lora_dict.keys():
+            if lora_name not in self.loras or self.loras[lora_name] != lora_dict[lora_name]:
+                same = False
+                break
+            
+        if same:    
             return new_prompt
     
         # Unload the current lora weights
         if len(self.loras) == 1:
             pipeline.unfuse_lora()
         elif len(self.loras) > 1:
-            self.set_model()
+            sd_plugin.set_model()
         
         # Cache lora info and load the lora weights
         self.loras = lora_dict
@@ -580,24 +615,9 @@ class PromptParser():
         for lora_name, lora_weight in lora_dict.items():
             if "/" in lora_name:
                 hf_repo, weight_name = self.hf_split(lora_name)
-                # try:
-                #     pipeline.load_lora_weights(hf_repo, weight_name=weight_name, adapter_name=str(adapter_name))
-                # except Exception as e:
-                #     if isinstance(e, ValueError):
-                #         raise HTTPException(status_code=400, detail="LoRA weights are incompatible with loaded model")
-                #     elif isinstance(e, OSError):
-                #         raise HTTPException(status_code=400, detail="LoRA weights not found in Hugging Face model hub")
                 self.check_lora_weights(pipeline, hf_repo, weight_name=weight_name, adapter_name=str(adapter_name), hf_repo=True)
-                # pipeline.load_lora_weights(hf_repo, weight_name=weight_name)
             else:
                 self.check_lora_weights(pipeline, self.loras_path, weight_name=lora_name, adapter_name=str(adapter_name))
-                # try:
-                #     pipeline.load_lora_weights(self.loras_path, weight_name=lora_name,  adapter_name=str(adapter_name))
-                # except Exception as e:
-                #     if isinstance(e, ValueError):
-                #         raise HTTPException(status_code=400, detail="LoRA weights are incompatible with loaded model")
-                #     elif isinstance(e, OSError):
-                #         raise HTTPException(status_code=400, detail="LoRA file not found in the specified path")
             adapter_name_list.append(str(adapter_name))
             adapter_weight_list.append(lora_weight)
             adapter_name += 1
@@ -630,3 +650,33 @@ class PromptParser():
                     raise HTTPException(status_code=400, detail="LoRA weights not found in Hugging Face model hub")
                 else:
                     raise HTTPException(status_code=400, detail="LoRA file not found in the specified path")
+    def parse_weighted_prompt(self, prompt):
+        cleaned_prompt = self.extract_weights(prompt)
+        return cleaned_prompt
+
+    def extract_weights(self, prompt):
+        # Match patterns like (prompt:weight) and extract them
+        pattern = re.compile(r'\(([^:]+):(\d*\.?\d+)\)')
+        matches = pattern.findall(prompt)
+
+        # Convert (prompt:weight) to (prompt)weight
+        def replace_match(match):
+            word, weight = match.groups()
+            return f"({word}){weight}"
+
+        cleaned_prompt = pattern.sub(replace_match, prompt)
+        return cleaned_prompt
+    
+
+    """
+    def parse_weighted_prompt(self, pipeline, prompt):
+        weights = self.extract_weights(prompt)
+        cleaned_prompt = re.sub(r"\+\+|--", "", prompt)
+        return cleaned_prompt, weights
+
+    def extract_weights(self, prompt):
+        # Finds patterns like "word++" or "word--" and assigns weight modifications
+        matches = re.findall(r"(\w+)(\+\+|--)", prompt)
+        weights = {match[0]: 1.1 ** match[1].count('+') if '+' in match[1] else 0.9 ** match[1].count('-') for match in matches}
+        return weights
+    """
