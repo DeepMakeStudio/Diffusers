@@ -545,14 +545,26 @@ class PromptParser():
         return new_prompt
     
     def parse_weighted_prompt(self, pipeline, prompt):
-        weights = self.extract_weights(prompt)
-        cleaned_prompt = re.sub(r"\(\w+:(?:\d*\.)?\d+\)", "", prompt)
+        cleaned_prompt, weights = self.extract_weights(prompt)
         return cleaned_prompt, weights
 
     def extract_weights(self, prompt):
-        matches = re.findall(r"\((\w+):((?:\d*\.)?\d+)\)", prompt)
-        weights = {match[0]: float(match[1]) for match in matches}
-        return weights
+        # Match patterns like (prompt:weight) and extract them
+        pattern = re.compile(r'\(([^:]+):(\d*\.?\d+)\)')
+        matches = pattern.findall(prompt)
+
+        weights = {}
+        for match in matches:
+            word, weight = match
+            weights[word] = float(weight)
+
+        # Convert (prompt:weight) to (prompt)weight
+        def replace_match(match):
+            word, weight = match.groups()
+            return f"({word}){weight}"
+
+        cleaned_prompt = pattern.sub(replace_match, prompt)
+        return cleaned_prompt, weights
     
 
     """
