@@ -296,7 +296,7 @@ class SD(Plugin):
     def _predict(self, text, seed=None, iterations=20, height=512, width=512, guidance_scale=7.0) -> None:
         print(f"_predict: text={text}, seed={seed}, iterations={iterations}, height=512, width=512, guidance_scale={guidance_scale}")
 
-        parsed_result, weights = self.pp.parse_prompt(self.tti, text)
+        parsed_result = self.pp.parse_prompt(self.tti, text)
         if isinstance(parsed_result, tuple):
             text, timestep_table = parsed_result
         else:
@@ -324,10 +324,6 @@ class SD(Plugin):
             compel_proc = Compel(tokenizer=self.tti.tokenizer, text_encoder=self.tti.text_encoder)
             for prompt in text:
                 embed_prompt, generator = self.prep_inputs(seed, prompt, compel_proc)
-                print(f"Embeddings before applying weights: {embed_prompt}")
-                if weights:
-                    embed_prompt = self.apply_weights(embed_prompt, self.tti.tokenizer, weights, prompt)
-                print(f"Embeddings after applying weights: {embed_prompt}")
                 embed_prompts.append(embed_prompt)
 
         print(f"_predict: embed_prompts={embed_prompts}")
@@ -427,17 +423,16 @@ class PromptParser():
         split = re.split("<ti:", new_prompt, 1)
         if len(split) != 1:
             new_prompt = self.parse_ti(pipeline, new_prompt)
+        new_prompt = self.parse_weighted_prompt(new_prompt)
+        print(f"parse_prompt: new_prompt={new_prompt}")
 
         print("Parsing for prompt travel")
         split = re.split("\[", new_prompt, 1)
+        timestep_table = None
         if len(split) != 1:
             new_prompt, timestep_table = self.parse_prompt_travel(new_prompt)
             return new_prompt, timestep_table
-        
-        new_prompt, weights = self.parse_weighted_prompt(pipeline, new_prompt)
-        print(f"parse_prompt: new_prompt={new_prompt}")
-        print(f"Weights: {weights}")
-        return new_prompt, weights
+        return new_prompt
     
     def parse_prompt_travel(self, prompt):
         prompt_list = []
@@ -544,19 +539,14 @@ class PromptParser():
 
         return new_prompt
     
-    def parse_weighted_prompt(self, pipeline, prompt):
-        cleaned_prompt, weights = self.extract_weights(prompt)
-        return cleaned_prompt, weights
+    def parse_weighted_prompt(self, prompt):
+        cleaned_prompt = self.extract_weights(prompt)
+        return cleaned_prompt
 
     def extract_weights(self, prompt):
         # Match patterns like (prompt:weight) and extract them
         pattern = re.compile(r'\(([^:]+):(\d*\.?\d+)\)')
         matches = pattern.findall(prompt)
-
-        weights = {}
-        for match in matches:
-            word, weight = match
-            weights[word] = float(weight)
 
         # Convert (prompt:weight) to (prompt)weight
         def replace_match(match):
@@ -564,7 +554,7 @@ class PromptParser():
             return f"({word}){weight}"
 
         cleaned_prompt = pattern.sub(replace_match, prompt)
-        return cleaned_prompt, weights
+        return cleaned_prompt
     
 
     """
