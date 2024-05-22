@@ -195,7 +195,6 @@ class SD(Plugin):
         """
         model_path = self.config["model_name"]
         dtype = self.config["model_dtype"]
-        print(dtype)
         if os.path.exists(model_path):
             if "xl" in model_path.lower():
                 self.type = "xl"
@@ -219,7 +218,6 @@ class SD(Plugin):
                                                                    torch_dtype=torch.float16,
                                                                    variant=dtype)
             # self.tti = AutoPipelineForText2Image.from_pretrained(model_path, torch_dtype=torch.float32 if dtype == "fp32" else torch.float16, variant=dtype)
-        print(self.tti._execution_device, type(self.tti), dtype)
         # self.tti.scheduler = PNDMScheduler.from_config(self.tti.scheduler.config)
         if self.config["scheduler"] == "pndm":
             pass
@@ -302,9 +300,6 @@ class SD(Plugin):
             for prompt in text:
                 embed_prompt, generator = self.prep_inputs(seed, prompt, compel_proc)
                 embed_prompts.append(embed_prompt)
-
-        print(f"_predict: embed_prompts={embed_prompts}")
-
         image = None
         timesteps, num_inference_steps = retrieve_timesteps(self.tti.scheduler, iterations, self.tti._execution_device, None)
         timesteps = timesteps.cpu()
@@ -499,57 +494,64 @@ class PromptParser():
         return new_prompt
     
     def parse_prompt_travel(self, prompt):
-        original_prompt = prompt
-        prompt_list = []
-        timestep_table = [0]
-        while re.search("\[", prompt):
-            prompt_start, temp = re.split("\[", prompt, 1)
-            phrase1, phrase2, timestep = re.split(":", temp, 2)
-            timestep, prompt_end = re.split("\]", timestep, 1)
-            timestep_table.append(int(timestep.split(":")[0]))
-            prompt1 = prompt_start + phrase1 + prompt_end
-            prompt2 = prompt_start + phrase2 + prompt_end
-            prompt_list.append(prompt1)
-            prompt_list.append(prompt2)
-            temp = timestep
-            if re.search(":", temp):
-                timestep, temp = re.split(":", temp, 1)
-            while re.search(":", temp):
-                phrase, timestep = re.split(":", temp, 1)
-                if re.search(":", timestep):
-                    timestep, temp = re.split(":", timestep, 1)
+        prompt_dict = {0: prompt}
+        # while re.search("\[", prompt):
+        #     self.get_table(prompt)
+        pattern = re.compile(r'(\[(\w*?\d*?):(\w*?\d*?):(\d*)(:(\w*?\d*?):\d*)*?\])')
+        matches = pattern.findall(prompt)
+        for match in matches:
+            timestep_table = [0]
+            replace_phrase = match[0]
+            info = replace_phrase.replace("[", "").replace("]", "").split(":")
+            text_list = []
+            for i in range(len(info)):
+                if i <= 1:
+                    text_list.append(info[i])
+                elif i % 2 == 0:
+                    timestep_table.append(int(info[i]))
                 else:
-                    temp = ""
-                timestep_table.append(int(timestep.split(":")[0]))
-                prompt_list.append(prompt_start + phrase + prompt_end)
-            prompt = prompt1
-            print(prompt_list, timestep_table)
-        
+                    text_list.append(info[i])
+            print("text_list: ", text_list)
+            print(timestep_table)
+            temp_prompt_dict = prompt_dict.copy()
+            for i in range(len(timestep_table)):
+                print("temp_prompt_dict: ", temp_prompt_dict)
+                timestep = timestep_table[i]
+                phrase = text_list[i]
+                print("phrase: ", phrase, "timestep: ", timestep)
+                if timestep in prompt_dict.keys():
+                    prompt_dict[timestep] = temp_prompt_dict[timestep].replace(replace_phrase, phrase)
+                else:
+                    timestep_list = list(sorted(prompt_dict.keys()))
+                    prev_idx = 0
+                    for idx in range(len(timestep_list)):
+                        if timestep_list[idx] < timestep:
+                            prev_idx = timestep_list[idx]
+                        else:
+                            break
+                    print("prev_idx: ", prev_idx)
+                    print("temp_prompt_dict: ", temp_prompt_dict)
+                    prompt_dict[timestep] = temp_prompt_dict[prev_idx].replace(replace_phrase, phrase)
+                    temp_prompt_dict[timestep] = temp_prompt_dict[prev_idx]
+            print(prompt_dict)
+            for key in prompt_dict.keys():
+                if key not in timestep_table:
 
+                    timestep_list = list(sorted(prompt_dict.keys()))
+                    prev_idx = 0
+                    for idx in range(len(timestep_table)):
+                        if timestep_list[idx] < key:
+                            phrase = text_list[idx]
+                        else:
+                            break
+                    prompt_dict[key] = prompt_dict[key].replace(replace_phrase, phrase)
+
+
+        prompt_dict = dict(sorted(prompt_dict.items()))
+        prompt_list = list(prompt_dict.values())
+        timestep_table = list(prompt_dict.keys())
+        print(prompt_list, timestep_table)
         return prompt_list, timestep_table
-
-    # def get_table(self, prompt):
-    #     prompt_start, temp = re.split("\[", prompt, 1)
-    #     phrase1, phrase2, timestep = re.split(":", temp, 2)
-    #     timestep, prompt_end = re.split("\]", timestep, 1)
-    #     timestep_table.append(int(timestep.split(":")[0]))
-    #     prompt1 = prompt_start + phrase1 + prompt_end
-    #     prompt2 = prompt_start + phrase2 + prompt_end
-    #     prompt_list.append(prompt1)
-    #     prompt_list.append(prompt2)
-    #     temp = timestep
-    #     if re.search(":", temp):
-    #         timestep, temp = re.split(":", temp, 1)
-    #     while re.search(":", temp):
-    #         phrase, timestep = re.split(":", temp, 1)
-    #         if re.search(":", timestep):
-    #             timestep, temp = re.split(":", timestep, 1)
-    #         else:
-    #             temp = ""
-    #         timestep_table.append(int(timestep.split(":")[0]))
-    #         prompt_list.append(prompt_start + phrase + prompt_end)
-    #     prompt = prompt1
-    #     print(prompt_list, timestep_table)
     
     def parse_ti(self, pipeline, prompt):
         while re.search("<ti:", prompt):
