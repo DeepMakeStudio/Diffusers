@@ -263,11 +263,6 @@ class SD(Plugin):
             generator = torch.manual_seed(seed)
 
         return embed_prompt, generator
-    
-    def apply_weights(self, embeddings, tokenizer, weights, text):
-        input_ids = tokenizer(text, return_tensors='pt').input_ids[0]
-        tokens = tokenizer.convert_ids_to_tokens(input_ids)
-        original_embeddings = embeddings.clone()
 
     def _predict(self, text, seed=None, iterations=20, height=512, width=512, guidance_scale=7.0, negative_prompt=None) -> None:
 
@@ -346,18 +341,22 @@ class SD(Plugin):
         return image
 
     def img_to_img_predict(self, text, image, seed=None, iterations=25, height=512, width=512, guidance_scale=7.0, strength=0.75, negative_prompt=None):
-        text = self.parse_prompt(self.tti, text)
+        text = self.pp.parse_prompt(self.iti, text)
         if isinstance(text, tuple):
             text, timestep_table = text
         elif isinstance(text, str):
             text = [text]
             timestep_table = None
+
+        print(f"parse_prompt: new_prompt={text}")
+
+
         embed_prompts = []
 
         if self.type == "xl":
             compel_proc = Compel(
-                tokenizer=[self.tti.tokenizer, self.tti.tokenizer_2],
-                text_encoder=[self.tti.text_encoder, self.tti.text_encoder_2],
+                tokenizer=[self.iti.tokenizer, self.iti.tokenizer_2],
+                text_encoder=[self.iti.text_encoder, self.iti.text_encoder_2],
                 returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
                 requires_pooled=[False, True]
             )
@@ -368,7 +367,7 @@ class SD(Plugin):
                 embed_prompts.append(embed_prompt)
                 pooled_prompts.append(pooled_prompt)
         else:
-            compel_proc = Compel(tokenizer=self.tti.tokenizer, text_encoder=self.tti.text_encoder)
+            compel_proc = Compel(tokenizer=self.iti.tokenizer, text_encoder=self.iti.text_encoder)
 
             for prompt in text:
                 embed_prompt, generator = self.prep_inputs(seed, prompt, compel_proc) 
@@ -376,10 +375,10 @@ class SD(Plugin):
 
         output_img = None
         timesteps, num_inference_steps = retrieve_timesteps(self.iti.scheduler, iterations, self.iti._execution_device, None)
-        print(timesteps, len(timesteps), num_inference_steps)
+        # print(timesteps, len(timesteps), num_inference_steps)
         timesteps, num_inference_steps = self.iti.get_timesteps(num_inference_steps, strength, self.iti._execution_device)
         timesteps = timesteps.cpu()
-        print(timesteps, len(timesteps), num_inference_steps)
+        # print(timesteps, len(timesteps), num_inference_steps)
 
 
         if self.type == "xl":
@@ -387,14 +386,14 @@ class SD(Plugin):
                 conditioning = embed_prompts[i]
                 pooled = pooled_prompts[i]
                 start_step = timestep_table[i] if timestep_table is not None else 0
-                print(len(timesteps))
+                # print(len(timesteps))
 
                 if i < len(text) - 1:
                     end_step = timestep_table[i+1] if timestep_table is not None else None
                 else:
                     end_step = None
 
-                print(len(text), i, start_step, timestep_table)
+                # print(len(text), i, start_step, timestep_table)
 
                 if i == len(text) - 1:
                     if output_img is not None:
@@ -412,7 +411,7 @@ class SD(Plugin):
             for i in range(len(text)):
                 embed_prompt = embed_prompts[i]
                 start_step = timestep_table[i] if timestep_table is not None else None
-                print(len(text), i, start_step, timestep_table)
+                # print(len(text), i, start_step, timestep_table)
                 if i < len(text) - 1:
                     end_step = timestep_table[i+1] if timestep_table is not None else None
                 else:
@@ -465,7 +464,6 @@ class PromptParser():
 
         # TODO Possible error?
         # if re.search("<", prompt) and not re.search("<lora:", prompt) and not re.search("<ti:", prompt):
-            
 
         print("Parsing for loras")
         split = re.split("<lora:", prompt, 1)
@@ -476,14 +474,12 @@ class PromptParser():
                 sd_plugin.set_model()
         else:
             new_prompt = self.parse_loras(pipeline, prompt)
-        print("Parsing for textual inversion")
 
+        print("Parsing for textual inversion")
         split = re.split("<ti:", new_prompt, 1)
         if len(split) != 1:
             new_prompt = self.parse_ti(pipeline, new_prompt)
-        print(new_prompt)
         new_prompt = self.parse_weighted_prompt(new_prompt)
-        print(f"parse_prompt: new_prompt={new_prompt}")
 
         print("Parsing for prompt travel")
         split = re.split("\[", new_prompt, 1)
@@ -491,14 +487,18 @@ class PromptParser():
         if len(split) != 1:
             new_prompt, timestep_table = self.parse_prompt_travel(new_prompt)
             return new_prompt, timestep_table
+
         return new_prompt
     
     def parse_prompt_travel(self, prompt):
         prompt_dict = {0: prompt}
-        # while re.search("\[", prompt):
-        #     self.get_table(prompt)
         pattern = re.compile(r'(\[(\w*?\d*?):(\w*?\d*?):(\d*)(:(\w*?\d*?):\d*)*?\])')
         matches = pattern.findall(prompt)
+
+        if len(matches) == 0:
+            print("Brackets used in prompt but not for prompt travel. Ignoring.")
+            return prompt, None
+        
         for match in matches:
             timestep_table = [0]
             replace_phrase = match[0]
@@ -511,14 +511,10 @@ class PromptParser():
                     timestep_table.append(int(info[i]))
                 else:
                     text_list.append(info[i])
-            print("text_list: ", text_list)
-            print(timestep_table)
             temp_prompt_dict = prompt_dict.copy()
             for i in range(len(timestep_table)):
-                print("temp_prompt_dict: ", temp_prompt_dict)
                 timestep = timestep_table[i]
                 phrase = text_list[i]
-                print("phrase: ", phrase, "timestep: ", timestep)
                 if timestep in prompt_dict.keys():
                     prompt_dict[timestep] = temp_prompt_dict[timestep].replace(replace_phrase, phrase)
                 else:
@@ -529,11 +525,9 @@ class PromptParser():
                             prev_idx = timestep_list[idx]
                         else:
                             break
-                    print("prev_idx: ", prev_idx)
-                    print("temp_prompt_dict: ", temp_prompt_dict)
+                    
                     prompt_dict[timestep] = temp_prompt_dict[prev_idx].replace(replace_phrase, phrase)
                     temp_prompt_dict[timestep] = temp_prompt_dict[prev_idx]
-            print(prompt_dict)
             for key in prompt_dict.keys():
                 if key not in timestep_table:
 
@@ -550,13 +544,14 @@ class PromptParser():
         prompt_dict = dict(sorted(prompt_dict.items()))
         prompt_list = list(prompt_dict.values())
         timestep_table = list(prompt_dict.keys())
-        print(prompt_list, timestep_table)
         return prompt_list, timestep_table
     
     def parse_ti(self, pipeline, prompt):
         while re.search("<ti:", prompt):
             prompt_start, temp = re.split("<ti:", prompt, 1)
             ti_info, prompt_end = re.split(">", temp, 1)
+            if len(ti_info.split(":")) != 2:
+                raise HTTPException(status_code=400, detail="Please make sure the textual inversion weight is in the format '<ti:ti_name:token>'")
             ti_name, token = ti_info.split(":")
             if sd_plugin.type == "xl":
                 if "/" in ti_name:
@@ -570,24 +565,31 @@ class PromptParser():
                 pipeline.load_textual_inversion(state_dict["clip_g"], token=[token0, token1], text_encoder=pipeline.text_encoder_2, tokenizer=pipeline.tokenizer_2)
                 prompt = prompt_start + token0 + token1 + prompt_end
             else:
+                token = "<" + token + ">"
                 if "/" in ti_name:
                     hf_repo, weight_name = self.hf_split(ti_name)
-                    pipeline.load_textual_inversion(hf_repo, weight_name=weight_name, token=token)
+                    self.check_textual_inversion_weights(pipeline, hf_repo, weight_name=weight_name, token=token, hf_repo=True)
                 else:
-                    pipeline.load_textual_inversion(self.textual_embedding_path, weight_name=ti_name, token=token)
+                    self.check_textual_inversion_weights(pipeline, self.textual_embedding_path, weight_name=ti_name, token=token)
                 prompt = prompt_start + token + prompt_end
+
         return prompt
     
     def parse_loras(self, pipeline, prompt):
         # Parsing for multiple loras
         new_prompt = prompt
         lora_dict = {}
-        print("Parsing prompt")
         while re.search("<lora:", new_prompt):
             prompt_start, temp = re.split("<lora:", new_prompt, 1)
             lora_info, prompt_end = re.split(">", temp, 1)
+            if len(lora_info.split(":")) != 2:
+                raise HTTPException(status_code=400, detail="Please make sure the LoRA weight is in the format '<lora:lora_name:weight>'")
             lora_name, lora_weight = lora_info.split(":")
-            lora_dict[lora_name] = float(lora_weight)
+            
+            try:
+                lora_dict[lora_name] = float(lora_weight)
+            except:
+                raise HTTPException(status_code=400, detail="Please make sure the LoRA weight is a number")
             new_prompt = prompt_start + prompt_end
 
         # If the lora structure is the same, return immediately
@@ -652,6 +654,20 @@ class PromptParser():
                     raise HTTPException(status_code=400, detail="LoRA weights not found in Hugging Face model hub")
                 else:
                     raise HTTPException(status_code=400, detail="LoRA file not found in the specified path")
+
+    def check_textual_inversion_weights(self, pipeline, path, weight_name, token, hf_repo=False):
+        try:
+            pipeline.load_textual_inversion(path, weight_name=weight_name, token=token)
+        except Exception as e:
+            if isinstance(e, ValueError):
+                raise HTTPException(status_code=400, detail="Textual inversion weights are incompatible with loaded model")
+            elif isinstance(e, OSError):
+                if hf_repo:
+                    raise HTTPException(status_code=400, detail="Textual inversion weights not found in Hugging Face model hub")
+                else:
+                    raise HTTPException(status_code=400, detail="Textual inversion file not found in the specified path")
+                
+    
     def parse_weighted_prompt(self, prompt):
         cleaned_prompt = self.extract_weights(prompt)
         return cleaned_prompt
@@ -668,17 +684,3 @@ class PromptParser():
 
         cleaned_prompt = pattern.sub(replace_match, prompt)
         return cleaned_prompt
-    
-
-    """
-    def parse_weighted_prompt(self, pipeline, prompt):
-        weights = self.extract_weights(prompt)
-        cleaned_prompt = re.sub(r"\+\+|--", "", prompt)
-        return cleaned_prompt, weights
-
-    def extract_weights(self, prompt):
-        # Finds patterns like "word++" or "word--" and assigns weight modifications
-        matches = re.findall(r"(\w+)(\+\+|--)", prompt)
-        weights = {match[0]: 1.1 ** match[1].count('+') if '+' in match[1] else 0.9 ** match[1].count('-') for match in matches}
-        return weights
-    """
