@@ -68,6 +68,12 @@ def set_model():
 def execute(json_data: dict, seed: int = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, control_image: str = None, negative_prompt: str = None):
     # check_model()
     prompt = json_data["prompt"]
+    prompt = sd_plugin.prompt_prefix + prompt
+    if negative_prompt is not None:
+        negative_prompt = sd_plugin.negative_prompt_prefix + negative_prompt
+    elif sd_plugin.negative_prompt_prefix != "":
+        negative_prompt = sd_plugin.negative_prompt_prefix
+
     if control_image is None:
         im = sd_plugin._predict(prompt, seed=seed, iterations=iterations, height=height, width=width, guidance_scale=guidance_scale, negative_prompt=negative_prompt)
     else:
@@ -85,6 +91,11 @@ def execute(json_data: dict, seed: int = None, iterations: int = 20, height: int
 def execute2(json_data: dict, seed = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, strength: float = 0.75, negative_prompt=None):
     # check_model()
     text = json_data["prompt"]
+    text = sd_plugin.prompt_prefix + text
+    if negative_prompt is not None:
+        negative_prompt = sd_plugin.negative_prompt_prefix + negative_prompt
+    elif sd_plugin.negative_prompt_prefix != "":
+        negative_prompt = sd_plugin.negative_prompt_prefix
     img = json_data["img"]
     imagebytes = fetch_image(img)
     image = Image.open(BytesIO(imagebytes))
@@ -116,6 +127,8 @@ class SD(Plugin):
         super().__init__(arguments)
         self.plugin_name = "Diffusers"
         self.pp = pp
+        self.prompt_prefix = self.config["prompt_prefix"]
+        self.negative_prompt_prefix = self.config["negative_prompt_prefix"]
 
     def load_lora_weights(self, pipeline, checkpoint_path, multiplier=1):
         if self.type == "xl":
@@ -265,7 +278,6 @@ class SD(Plugin):
         return embed_prompt, generator
 
     def _predict(self, text, seed=None, iterations=20, height=512, width=512, guidance_scale=7.0, negative_prompt=None) -> None:
-
         parsed_result = self.pp.parse_prompt(self.tti, text)
         if isinstance(parsed_result, tuple):
             text, timestep_table = parsed_result
@@ -274,6 +286,7 @@ class SD(Plugin):
             timestep_table = None
 
         print(f"parse_prompt: new_prompt={text}")
+        print(f"negative_prompt={negative_prompt}")
 
         embed_prompts = []
 
@@ -349,6 +362,7 @@ class SD(Plugin):
             timestep_table = None
 
         print(f"parse_prompt: new_prompt={text}")
+        print(f"negative_prompt={negative_prompt}")
 
 
         embed_prompts = []

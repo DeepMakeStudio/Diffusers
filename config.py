@@ -12,6 +12,8 @@ config = {
     "model_dtype": "fp32" if sys.platform == "darwin" else "fp16",
     "loras_path": "loras",
     "textual_embedding_path": "ti",
+    "negative_prompt_prefix": "NSFW, nudity, low quality, ",
+    "prompt_prefix": "",
     "scheduler": "pndm",
     "controlnet": "lllyasviel/sd-controlnet-canny"
 }
