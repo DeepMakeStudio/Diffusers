@@ -469,6 +469,9 @@ class PromptParser():
         self.loras = {}
         self.loras_path = args.config["loras_path"]
         self.textual_embedding_path = args.config["textual_embedding_path"]
+        self.travel_pattern = re.compile(r'(\[(\w*?\d*?):(\w*?\d*?):(\d*)(:(\w*?\d*?):\d*)*?\])')
+        self.weight_pattern = re.compile(r'\(([^:]+):(\d*\.?\d+)\)')
+
 
     def parse_prompt(self, pipeline, prompt):
         print(f"parse_prompt: initial prompt={prompt}")
@@ -496,18 +499,18 @@ class PromptParser():
         new_prompt = self.parse_weighted_prompt(new_prompt)
 
         print("Parsing for prompt travel")
-        split = re.split("\[", new_prompt, 1)
+        matches = self.travel_pattern.findall(new_prompt)
         timestep_table = None
-        if len(split) != 1:
-            new_prompt, timestep_table = self.parse_prompt_travel(new_prompt)
+        if len(matches) > 0:
+            new_prompt, timestep_table = self.parse_prompt_travel(prompt, matches)
             return new_prompt, timestep_table
 
         return new_prompt
     
-    def parse_prompt_travel(self, prompt):
+    def parse_prompt_travel(self, prompt, matches):
         prompt_dict = {0: prompt}
-        pattern = re.compile(r'(\[(\w*?\d*?):(\w*?\d*?):(\d*)(:(\w*?\d*?):\d*)*?\])')
-        matches = pattern.findall(prompt)
+        # pattern = re.compile(r'(\[(\w*?\d*?):(\w*?\d*?):(\d*)(:(\w*?\d*?):\d*)*?\])')
+        # matches = pattern.findall(prompt)
 
         if len(matches) == 0:
             print("Brackets used in prompt but not for prompt travel. Ignoring.")
@@ -688,13 +691,12 @@ class PromptParser():
 
     def extract_weights(self, prompt):
         # Match patterns like (prompt:weight) and extract them
-        pattern = re.compile(r'\(([^:]+):(\d*\.?\d+)\)')
-        matches = pattern.findall(prompt)
+        # matches = pattern.findall(prompt)
 
         # Convert (prompt:weight) to (prompt)weight
         def replace_match(match):
             word, weight = match.groups()
             return f"({word}){weight}"
 
-        cleaned_prompt = pattern.sub(replace_match, prompt)
+        cleaned_prompt = self.weight_pattern.sub(replace_match, prompt)
         return cleaned_prompt
