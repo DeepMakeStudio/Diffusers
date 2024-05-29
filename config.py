@@ -15,7 +15,12 @@ config = {
     "negative_prompt_prefix": "NSFW, nudity, low quality, ",
     "prompt_prefix": "",
     "scheduler": "pndm",
-    "controlnet": "lllyasviel/sd-controlnet-canny"
+    "controlnet": "lllyasviel/sd-controlnet-canny",
+    "schedulers": [
+        "pndm", "dpm", "euler", "heun", "lms",
+        "dpm_2", "dpm_2_ancestral", "dpm_fast", "dpm_adaptive",
+        "dpmpp_2s_ancestral", "dpmpp_2m"
+    ]
 }
 endpoints = {
     "generate_image": {
@@ -27,7 +32,8 @@ endpoints = {
             "iterations": "Int(default=20, min=1, optional=true)",
             "height": "Int(default=512, min=16, optional=true)",
             "width": "Int(default=512, min=16, optional=true)",
-            "negative_prompt": "Text(default=None, optional=true)"
+            "negative_prompt": "Text(default=None, optional=true)",
+            "scheduler": "Text(default='pndm', optional=true)"
         },
         "outputs": {"output_img": "Image"}
     },
@@ -42,7 +48,8 @@ endpoints = {
             "height": "Int(default=512, min=16, optional=true)",
             "width": "Int(default=512, min=16, optional=true)",
             "strength": "Float(default=0.75, min=0.0, max=1.0, optional=true)",
-            "negative_prompt": "Text(default=None, optional=true)"
+            "negative_prompt": "Text(default=None, optional=true)",
+            "scheduler": "Text(default='pndm', optional=true)"
         },
         "outputs": {"output_img": "Image"}
     }

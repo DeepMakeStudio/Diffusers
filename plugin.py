@@ -5,7 +5,7 @@ from PIL import Image
 
 from io import BytesIO
 import torch
-from diffusers import DiffusionPipeline, StableDiffusionControlNetPipeline, StableDiffusionXLControlNetPipeline, StableDiffusionXLPipeline,AutoPipelineForText2Image,AutoPipelineForImage2Image, StableDiffusionPipeline, StableDiffusionImg2ImgPipeline, DPMSolverMultistepScheduler, PNDMScheduler, StableDiffusionInpaintPipeline, ControlNetModel
+from diffusers import DiffusionPipeline, StableDiffusionControlNetPipeline, StableDiffusionXLControlNetPipeline, StableDiffusionXLPipeline,AutoPipelineForText2Image,AutoPipelineForImage2Image, StableDiffusionPipeline, StableDiffusionImg2ImgPipeline, DPMSolverMultistepScheduler, PNDMScheduler, StableDiffusionInpaintPipeline, ControlNetModel, EulerDiscreteScheduler,HeunDiscreteScheduler, LMSDiscreteScheduler, KDPM2DiscreteScheduler,KDPM2AncestralDiscreteScheduler
 from .pipelines import StableDiffusionPTPipeline, retrieve_timesteps, StableDiffusionXLPTPipeline, StableDiffusionImg2ImgPTPipeline, StableDiffusionXLImg2ImgPTPipeline
 import threading
 import time
@@ -65,7 +65,7 @@ def set_model():
     return {"status": "Success", "detail": f"Model set successfully to {model_name}"}
 
 @app.put("/execute/")
-def execute(json_data: dict, seed: int = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, control_image: str = None, negative_prompt: str = None):
+def execute(json_data: dict, seed: int = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, control_image: str = None, negative_prompt: str = None, scheduler: str = "pndm"):
     # check_model()
     prompt = json_data["prompt"]
     prompt = sd_plugin.prompt_prefix + prompt
@@ -73,6 +73,12 @@ def execute(json_data: dict, seed: int = None, iterations: int = 20, height: int
         negative_prompt = sd_plugin.negative_prompt_prefix + negative_prompt
     elif sd_plugin.negative_prompt_prefix != "":
         negative_prompt = sd_plugin.negative_prompt_prefix
+
+    # Extract scheduler setting from JSON data if it exists, else default to 'pndm'
+    scheduler = json_data.get("scheduler", "pndm")
+
+    config["scheduler"] = scheduler
+    sd_plugin.set_model()
 
     if control_image is None:
         im = sd_plugin._predict(prompt, seed=seed, iterations=iterations, height=height, width=width, guidance_scale=guidance_scale, negative_prompt=negative_prompt)
@@ -88,7 +94,7 @@ def execute(json_data: dict, seed: int = None, iterations: int = 20, height: int
     return {"status": "Success", "output_img": image_id}
 
 @app.put("/execute2/")
-def execute2(json_data: dict, seed = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, strength: float = 0.75, negative_prompt=None):
+def execute2(json_data: dict, seed = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, strength: float = 0.75, negative_prompt=None, scheduler: str = "pndm"):
     # check_model()
     text = json_data["prompt"]
     text = sd_plugin.prompt_prefix + text
@@ -96,6 +102,8 @@ def execute2(json_data: dict, seed = None, iterations: int = 20, height: int = 5
         negative_prompt = sd_plugin.negative_prompt_prefix + negative_prompt
     elif sd_plugin.negative_prompt_prefix != "":
         negative_prompt = sd_plugin.negative_prompt_prefix
+    config["scheduler"] = scheduler
+    sd_plugin.set_model()
     img = json_data["img"]
     imagebytes = fetch_image(img)
     image = Image.open(BytesIO(imagebytes))
@@ -208,6 +216,7 @@ class SD(Plugin):
         """
         model_path = self.config["model_name"]
         dtype = self.config["model_dtype"]
+        scheduler_name = self.config.get("scheduler", "pndm")
         if os.path.exists(model_path):
             if "xl" in model_path.lower():
                 self.type = "xl"
@@ -232,12 +241,32 @@ class SD(Plugin):
                                                                    variant=dtype)
             # self.tti = AutoPipelineForText2Image.from_pretrained(model_path, torch_dtype=torch.float32 if dtype == "fp32" else torch.float16, variant=dtype)
         # self.tti.scheduler = PNDMScheduler.from_config(self.tti.scheduler.config)
-        if self.config["scheduler"] == "pndm":
-            pass
-        elif self.config["scheduler"] == "dpm":
-            self.tti.scheduler = DPMSolverMultistepScheduler.from_config(self.tti.scheduler.config)
-        else:
-            print("Warning: Unknown scheduler. Using PNDM")
+
+        scheduler_map = {
+            "pndm": PNDMScheduler,
+            "dpm": DPMSolverMultistepScheduler,
+            "euler": EulerDiscreteScheduler,
+            "heun": HeunDiscreteScheduler,
+            "lms": LMSDiscreteScheduler,
+            "dpm_2": KDPM2DiscreteScheduler,
+            "dpm_2_ancestral": KDPM2AncestralDiscreteScheduler,
+            "dpm_fast": DPMSolverMultistepScheduler,
+            "dpm_adaptive": DPMSolverMultistepScheduler,
+            "dpmpp_2s_ancestral": DPMSolverMultistepScheduler,
+            "dpmpp_2m": DPMSolverMultistepScheduler
+        }
+
+        scheduler_class = scheduler_map.get(scheduler_name)
+        if scheduler_class:
+            self.tti.scheduler = scheduler_class.from_config(self.tti.scheduler.config)
+            print(f"Scheduler set to {scheduler_class.__name__}")
+
+        #if self.config["scheduler"] == "pndm":
+            #pass
+        #elif self.config["scheduler"] == "dpm":
+            #self.tti.scheduler = DPMSolverMultistepScheduler.from_config(self.tti.scheduler.config)
+        #else:
+            #print("Warning: Unknown scheduler. Using PNDM")
 
         if self.type == "xl":
             self.iti = StableDiffusionXLImg2ImgPTPipeline(**self.tti.components)
