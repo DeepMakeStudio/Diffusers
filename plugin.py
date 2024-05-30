@@ -278,7 +278,7 @@ class SD(Plugin):
         return embed_prompt, generator
 
     def _predict(self, text, seed=None, iterations=20, height=512, width=512, guidance_scale=7.0, negative_prompt=None) -> None:
-        parsed_result = self.pp.parse_prompt(self.tti, text)
+        parsed_result = self.pp.parse_prompt(self.tti, text, iterations)
         if isinstance(parsed_result, tuple):
             text, timestep_table = parsed_result
         else:
@@ -354,7 +354,7 @@ class SD(Plugin):
         return image
 
     def img_to_img_predict(self, text, image, seed=None, iterations=25, height=512, width=512, guidance_scale=7.0, strength=0.75, negative_prompt=None):
-        text = self.pp.parse_prompt(self.iti, text)
+        text = self.pp.parse_prompt(self.iti, text, iterations)
         if isinstance(text, tuple):
             text, timestep_table = text
         elif isinstance(text, str):
@@ -470,10 +470,11 @@ class PromptParser():
         self.loras_path = args.config["loras_path"]
         self.textual_embedding_path = args.config["textual_embedding_path"]
         self.travel_pattern = re.compile(r'(\[(\w*?\d*?):(\w*?\d*?):(\d*)(:(\w*?\d*?):\d*)*?\])')
+        self.alternate_pattern = re.compile(r'(\[(\w*?\d*?):(\w*?\d*?)(:\w*?\d*?)*?(:\(\d*(,\d*)*?\))*?\])')
         self.weight_pattern = re.compile(r'\(([^:]+):(\d*\.?\d+)\)')
 
 
-    def parse_prompt(self, pipeline, prompt):
+    def parse_prompt(self, pipeline, prompt, iterations):
         print(f"parse_prompt: initial prompt={prompt}")
 
         # Replace %2F with / in prompt from HTTP TODO: Find a better way to handle this
@@ -500,26 +501,44 @@ class PromptParser():
 
         print("Parsing for prompt travel")
         matches = self.travel_pattern.findall(new_prompt)
+        alternate_matches = self.alternate_pattern.findall(new_prompt)
         timestep_table = None
-        if len(matches) > 0:
-            new_prompt, timestep_table = self.parse_prompt_travel(prompt, matches)
+        if len(matches) > 0 or len(alternate_matches) > 0:
+            new_prompt, timestep_table = self.parse_prompt_travel(prompt, matches, total_iterations=iterations)
             return new_prompt, timestep_table
 
         return new_prompt
     
-    def parse_prompt_travel(self, prompt, matches):
+    def parse_prompt_travel(self, prompt, matches, total_iterations):
         prompt_dict = {0: prompt}
         # pattern = re.compile(r'(\[(\w*?\d*?):(\w*?\d*?):(\d*)(:(\w*?\d*?):\d*)*?\])')
         # matches = pattern.findall(prompt)
 
-        if len(matches) == 0:
-            print("Brackets used in prompt but not for prompt travel. Ignoring.")
-            return prompt, None
-        
-        for match in matches:
-            timestep_table = [0]
+        # functions used for parsing the prompt
+        def extract_info(match):
             replace_phrase = match[0]
             info = replace_phrase.replace("[", "").replace("]", "").split(":")
+            return replace_phrase, info
+    
+        def edit_prompt_dict(timestep, phrase, replace_phrase, prompt_dict, temp_prompt_dict):
+            if timestep in prompt_dict.keys():
+                prompt_dict[timestep] = prompt_dict[timestep].replace(replace_phrase, phrase)
+            else:
+                timestep_list = list(sorted(prompt_dict.keys()))
+                prev_idx = 0
+                for idx in range(len(timestep_list)):
+                    if timestep_list[idx] < timestep:
+                        prev_idx = timestep_list[idx]
+                    else:
+                        break
+                prompt_dict[timestep] = temp_prompt_dict[prev_idx].replace(replace_phrase, phrase)
+                temp_prompt_dict[timestep] = temp_prompt_dict[prev_idx]
+            return prompt_dict, temp_prompt_dict
+        
+        # first parse looking for '[phrase1:phrase2:time1:phrase3:time2]'
+        for match in matches:
+            timestep_table = [0]
+            replace_phrase, info = extract_info(match)
             text_list = []
             for i in range(len(info)):
                 if i <= 1:
@@ -532,19 +551,7 @@ class PromptParser():
             for i in range(len(timestep_table)):
                 timestep = timestep_table[i]
                 phrase = text_list[i]
-                if timestep in prompt_dict.keys():
-                    prompt_dict[timestep] = temp_prompt_dict[timestep].replace(replace_phrase, phrase)
-                else:
-                    timestep_list = list(sorted(prompt_dict.keys()))
-                    prev_idx = 0
-                    for idx in range(len(timestep_list)):
-                        if timestep_list[idx] < timestep:
-                            prev_idx = timestep_list[idx]
-                        else:
-                            break
-                    
-                    prompt_dict[timestep] = temp_prompt_dict[prev_idx].replace(replace_phrase, phrase)
-                    temp_prompt_dict[timestep] = temp_prompt_dict[prev_idx]
+                prompt_dict, temp_prompt_dict = edit_prompt_dict(timestep, phrase, replace_phrase, prompt_dict, temp_prompt_dict)
             for key in prompt_dict.keys():
                 if key not in timestep_table:
 
@@ -557,10 +564,60 @@ class PromptParser():
                             break
                     prompt_dict[key] = prompt_dict[key].replace(replace_phrase, phrase)
 
-
         prompt_dict = dict(sorted(prompt_dict.items()))
         prompt_list = list(prompt_dict.values())
         timestep_table = list(prompt_dict.keys())
+        print("after first parse: ", prompt_list, timestep_table)
+
+        # second parse looking for '[phrase1:phrase2:(time1, time2)]'
+        alternate_matches = self.alternate_pattern.findall(prompt_list[0])
+        print("alternate matches: ", alternate_matches)
+        for match in alternate_matches:
+            replace_phrase, info = extract_info(match)
+            text_list = []
+            iterations = []
+            
+            print("info: ", info)
+            for i in range(len(info)):
+                if i <= 1:
+                    text_list.append(info[i])
+                elif "(" in info[i]:
+                    iterations = info[i].replace("(", "").replace(")", "").split(",")
+                else:
+                    text_list.append(info[i])
+
+            if len(iterations) == 0:
+                iterations = [1 for _ in range(len(text_list))]
+
+            if len(iterations) != len(text_list):
+                raise HTTPException(status_code=400, detail="Please make sure the number of iteration splits matches the number of prompts")
+            
+            timestep = 0
+            index = 0
+            temp_prompt_dict = prompt_dict.copy()
+
+            while timestep < total_iterations:
+                phrase = text_list[index]
+                prompt_dict, temp_prompt_dict = edit_prompt_dict(timestep, phrase, replace_phrase, prompt_dict, temp_prompt_dict)
+                timestep += int(iterations[index])
+                index += 1
+                if index == len(text_list):
+                    index = 0
+                    
+            new_text_list = []
+            for i in range(len(iterations)):
+                new_text_list += [text_list[i] for _ in range(int(iterations[i]))]
+
+            for key in prompt_dict.keys():
+                if replace_phrase in prompt_dict[key]:
+                    phrase = new_text_list[key % len(new_text_list)]
+                    prompt_dict[key] = prompt_dict[key].replace(replace_phrase, phrase)
+                        
+                
+        prompt_dict = dict(sorted(prompt_dict.items()))
+        prompt_list = list(prompt_dict.values())
+        timestep_table = list(prompt_dict.keys())
+        print("after second parse: ", prompt_list, timestep_table)
         return prompt_list, timestep_table
     
     def parse_ti(self, pipeline, prompt):
