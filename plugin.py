@@ -64,7 +64,7 @@ def set_model():
     model_name = sd_plugin.config["model_name"]
     return {"status": "Success", "detail": f"Model set successfully to {model_name}"}
 
-def set_scheduler(scheduler_name):
+def set_scheduler(scheduler_name, model_type='tti'):
     scheduler_map = {
         "pndm": PNDMScheduler,
         "dpm": DPMSolverMultistepScheduler,
@@ -81,10 +81,12 @@ def set_scheduler(scheduler_name):
 
     scheduler_class = scheduler_map.get(scheduler_name)
     if scheduler_class:
-        sd_plugin.tti.scheduler = scheduler_class.from_config(sd_plugin.tti.scheduler.config)
-        print(f"Scheduler set to {scheduler_class.__name__}")
+        model = getattr(sd_plugin, model_type)
+        model.scheduler = scheduler_class.from_config(model.scheduler.config)
+        print(f"Scheduler set to {scheduler_class.__name__} for {model_type}")
     else:
         raise ValueError("Invalid scheduler specified")
+
 
 @app.put("/execute/")
 def execute(json_data: dict, seed: int = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, control_image: str = None, negative_prompt: str = None, scheduler: str = "pndm"):
@@ -98,7 +100,7 @@ def execute(json_data: dict, seed: int = None, iterations: int = 20, height: int
 
     # Extract scheduler setting from JSON data if it exists, else default to 'pndm'
     scheduler = json_data.get("scheduler", "pndm")
-    set_scheduler(scheduler)
+    set_scheduler(scheduler,'tti')
 
     #config["scheduler"] = scheduler
     #sd_plugin.set_model()
@@ -128,7 +130,7 @@ def execute2(json_data: dict, seed = None, iterations: int = 20, height: int = 5
     #config["scheduler"] = scheduler
     #sd_plugin.set_model()
     scheduler = json_data.get("scheduler", "pndm")
-    set_scheduler(scheduler)
+    set_scheduler(scheduler,'iti')
 
     img = json_data["img"]
     imagebytes = fetch_image(img)
