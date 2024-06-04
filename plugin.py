@@ -189,10 +189,10 @@ class SD(Plugin):
         """
         Load given weights into model.
         """
-        model_path = self.config["model_name"]
+        model_path = self.config["model_name"].strip()
         dtype = self.config["model_dtype"]
         cached_models = scan_cache_dir()
-        if not any(model_path in repo_info.repo_id for repo_info in cached_models.repos):
+        if not any(model_path in repo_info.repo_id for repo_info in cached_models.repos) and not os.path.exists(model_path):
             load_bar = LoadingBar()
             load_bar.start(model_path, torch.float32 if dtype == "fp32" else torch.float16, dtype)
 
