@@ -30,3 +30,4 @@ dependencies:
       - accelerate
       - invisible_watermark
       - transformers
+      - scipy

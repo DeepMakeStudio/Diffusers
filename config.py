@@ -12,10 +12,9 @@ config = {
     "model_dtype": "fp32" if sys.platform == "darwin" else "fp16",
     "loras_path": "loras",
     "textual_embedding_path": "ti",
-    "negative_prompt_prefix": "NSFW, nudity, low quality, ",
+    "negative_prompt_prefix": "",
     "prompt_prefix": "",
-    "scheduler": "pndm",
-    "controlnet": "lllyasviel/sd-controlnet-canny"
+    "controlnet": "lllyasviel/sd-controlnet-canny",
 }
 endpoints = {
     "generate_image": {
@@ -27,7 +26,8 @@ endpoints = {
             "iterations": "Int(default=20, min=1, optional=true)",
             "height": "Int(default=512, min=16, optional=true)",
             "width": "Int(default=512, min=16, optional=true)",
-            "negative_prompt": "Text(default=None, optional=true)"
+            "negative_prompt": "Text(default=None, optional=true)",
+            "scheduler": "Text(default='pndm', optional=true)"
         },
         "outputs": {"output_img": "Image"}
     },
@@ -42,7 +42,8 @@ endpoints = {
             "height": "Int(default=512, min=16, optional=true)",
             "width": "Int(default=512, min=16, optional=true)",
             "strength": "Float(default=0.75, min=0.0, max=1.0, optional=true)",
-            "negative_prompt": "Text(default=None, optional=true)"
+            "negative_prompt": "Text(default=None, optional=true)",
+            "scheduler": "Text(default='pndm', optional=true)"
         },
         "outputs": {"output_img": "Image"}
     }
