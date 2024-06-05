@@ -65,6 +65,7 @@ def set_model():
     return {"status": "Success", "detail": f"Model set successfully to {model_name}"}
 
 def set_scheduler(scheduler_name, model_type='tti'):
+    print(scheduler_name)
     scheduler_map = {
         "pndm": PNDMScheduler,
         "dpm": DPMSolverMultistepScheduler,
@@ -99,7 +100,7 @@ def execute(json_data: dict, seed: int = None, iterations: int = 20, height: int
         negative_prompt = sd_plugin.negative_prompt_prefix
 
     # Extract scheduler setting from JSON data if it exists, else default to 'pndm'
-    scheduler = json_data.get("scheduler", "pndm")
+    # scheduler = json_data.get("scheduler", "pndm")
     set_scheduler(scheduler,'tti')
 
     #config["scheduler"] = scheduler
@@ -129,7 +130,7 @@ def execute2(json_data: dict, seed = None, iterations: int = 20, height: int = 5
         negative_prompt = sd_plugin.negative_prompt_prefix
     #config["scheduler"] = scheduler
     #sd_plugin.set_model()
-    scheduler = json_data.get("scheduler", "pndm")
+    # scheduler = json_data.get("scheduler", "pndm")
     set_scheduler(scheduler,'iti')
 
     img = json_data["img"]
