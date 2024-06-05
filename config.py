@@ -12,15 +12,9 @@ config = {
     "model_dtype": "fp32" if sys.platform == "darwin" else "fp16",
     "loras_path": "loras",
     "textual_embedding_path": "ti",
-    "negative_prompt_prefix": "NSFW, nudity, low quality, ",
+    "negative_prompt_prefix": "",
     "prompt_prefix": "",
-    "scheduler": "pndm",
     "controlnet": "lllyasviel/sd-controlnet-canny",
-    "schedulers": [
-        "pndm", "dpm", "euler", "heun", "lms",
-        "dpm_2", "dpm_2_ancestral", "dpm_fast", "dpm_adaptive",
-        "dpmpp_2s_ancestral", "dpmpp_2m"
-    ]
 }
 endpoints = {
     "generate_image": {
