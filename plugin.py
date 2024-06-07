@@ -92,7 +92,16 @@ def set_scheduler(scheduler_name, model_type='tti'):
 @app.put("/execute/")
 def execute(json_data: dict, seed: int = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, control_image: str = None, negative_prompt: str = None, scheduler: str = "pndm"):
     # check_model()
-    prompt = json_data["prompt"]
+    prompt = json_data.get("prompt", "")
+    seed = json_data.get("seed", seed)
+    iterations = json_data.get("iterations", iterations)
+    height = json_data.get("height", height)
+    width = json_data.get("width", width)
+    guidance_scale = json_data.get("guidance_scale", guidance_scale)
+    control_image = json_data.get("control_image", control_image)
+    negative_prompt = json_data.get("negative_prompt", negative_prompt)
+    scheduler = json_data.get("scheduler", scheduler)
+
     prompt = sd_plugin.prompt_prefix + prompt
     if negative_prompt is not None:
         negative_prompt = sd_plugin.negative_prompt_prefix + negative_prompt
@@ -100,7 +109,6 @@ def execute(json_data: dict, seed: int = None, iterations: int = 20, height: int
         negative_prompt = sd_plugin.negative_prompt_prefix
 
     # Extract scheduler setting from JSON data if it exists, else default to 'pndm'
-    # scheduler = json_data.get("scheduler", "pndm")
     set_scheduler(scheduler,'tti')
 
     #config["scheduler"] = scheduler
@@ -122,7 +130,20 @@ def execute(json_data: dict, seed: int = None, iterations: int = 20, height: int
 @app.put("/execute2/")
 def execute2(json_data: dict, seed = None, iterations: int = 20, height: int = 512, width: int = 512, guidance_scale: float = 7.0, strength: float = 0.75, negative_prompt=None, scheduler: str = "pndm"):
     # check_model()
-    text = json_data["prompt"]
+    text = json_data.get("prompt", "")
+    try:
+        img = json_data["img"]
+    except:
+        raise HTTPException(status_code=400, detail="Image not provided")
+    seed = json_data.get("seed", seed)
+    iterations = json_data.get("iterations", iterations)
+    height = json_data.get("height", height)
+    width = json_data.get("width", width)
+    guidance_scale = json_data.get("guidance_scale", guidance_scale)
+    control_image = json_data.get("control_image", control_image)
+    negative_prompt = json_data.get("negative_prompt", negative_prompt)
+    scheduler = json_data.get("scheduler", scheduler)
+
     text = sd_plugin.prompt_prefix + text
     if negative_prompt is not None:
         negative_prompt = sd_plugin.negative_prompt_prefix + negative_prompt
@@ -133,7 +154,6 @@ def execute2(json_data: dict, seed = None, iterations: int = 20, height: int = 5
     # scheduler = json_data.get("scheduler", "pndm")
     set_scheduler(scheduler,'iti')
 
-    img = json_data["img"]
     imagebytes = fetch_image(img)
     image = Image.open(BytesIO(imagebytes))
     image = image.convert("RGB")
