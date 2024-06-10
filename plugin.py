@@ -57,7 +57,7 @@ def set_model():
     global sd_plugin
     args = {"plugin": plugin, "config": config, "endpoints": endpoints}
     pp = PromptParser(Namespace(**args))
-    sd_plugin = SD(Namespace(**args), pp)
+    sd_plugin = SD(Namespace(**args), "Diffusers", pp)
     sd_plugin.set_model()
     # try:
     # sd_plugin.set_model(args["model_name"], dtype=args["model_dtype"])
@@ -180,9 +180,8 @@ class SD(Plugin):
     """
     Prediction inference.
     """
-    def __init__(self, arguments: "Namespace", pp) -> None:
-        super().__init__(arguments)
-        self.plugin_name = "Diffusers"
+    def __init__(self, arguments: "Namespace", plugin_name, pp) -> None:
+        super().__init__(arguments, plugin_name)
         self.pp = pp
         self.prompt_prefix = self.config["prompt_prefix"]
         self.negative_prompt_prefix = self.config["negative_prompt_prefix"]
