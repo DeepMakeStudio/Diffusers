@@ -1,6 +1,7 @@
 import os
 from argparse import Namespace
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from PIL import Image
 
 from io import BytesIO
@@ -13,16 +14,40 @@ import sys
 from safetensors.torch import load_file
 from collections import defaultdict
 from compel import Compel, ReturnedEmbeddingsType
-from plugin import Plugin, fetch_image, store_image
+from plugin import Plugin, fetch_image, store_image, custom_exception_handler
 from .config import plugin, config, endpoints
 import numpy as np
-from .download_gui import LoadingBar
+import traceback
+import json
+import requests
+
+
+#from .download_gui import LoadingBar
 from huggingface_hub import scan_cache_dir
 app = FastAPI()
 
 def check_model():
     if 'sd_plugin' not in globals():
         set_model()
+
+import sys
+sys.excepthook = custom_exception_handler
+
+@app.exception_handler(Exception)
+async def exception_callback(request: Request, exc: Exception):
+    # print(f"Exception: {exc}")
+    # print(f"Traceback: {traceback.format_exception(exc)}")
+    # print(f"Exception type: {str(exc.__class__)}")
+    requests.put("http://127.0.0.1:8000/backend/exception_callback", json={"exc_type": type(exc).__name__, "traceback": traceback.format_exception(exc)})
+    return JSONResponse(
+        status_code=500,
+        content={"type": type(exc).__name__, "message": traceback.format_exception(exc)},
+    )
+    # You can also print the traceback if needed
+# Assign the custom exception handler to sys.excepthook
+# Your code goes here
+# Any unhandled exceptions will be caught by the custom_exception_handler
+  # This will raise a ZeroDivisionError
 
 @app.get("/get_info/")
 def plugin_info():
@@ -47,7 +72,8 @@ async def startup_event():
         set_model()
         print("Successfully started up")
         sd_plugin.notify_main_system_of_startup("True")
-    except:
+    except Exception as e:
+        print(f"Failed to start up: {e}")
         sd_plugin.notify_main_system_of_startup("False")
 
 @app.get("/set_model/")
@@ -192,9 +218,9 @@ class SD(Plugin):
         model_path = self.config["model_name"].strip()
         dtype = self.config["model_dtype"]
         cached_models = scan_cache_dir()
-        if not any(model_path in repo_info.repo_id for repo_info in cached_models.repos) and not os.path.exists(model_path):
-            load_bar = LoadingBar()
-            load_bar.start(model_path, torch.float32 if dtype == "fp32" else torch.float16, dtype)
+        #if not any(model_path in repo_info.repo_id for repo_info in cached_models.repos) and not os.path.exists(model_path):
+            #load_bar = LoadingBar()
+            #load_bar.start(model_path, torch.float32 if dtype == "fp32" else torch.float16, dtype)
 
         if os.path.exists(model_path):
             if "xl" in model_path.lower():
